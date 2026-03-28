@@ -1,27 +1,25 @@
-﻿import os
-import json
-import tempfile
+﻿import json
+import os
+import shutil
 import subprocess
+import sys
+import tempfile
 import urllib.request
 import urllib.error
+import zipfile
+from pathlib import Path
 
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox, QApplication
 
 from version import __version__
 
-# -----------------------------
-# НАСТРОЙКИ
-# -----------------------------
 GITHUB_OWNER = "Reddeq"
 GITHUB_REPO = "desktop_pet"
-ASSET_NAME = "DesktopPetSetup.exe"   # имя файла, который ты прикладываешь к GitHub Release
+ZIP_ASSET_NAME = "DesktopPet-win64.zip"
 
 API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 
 
-# -----------------------------
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# -----------------------------
 def normalize_version(version: str) -> str:
     return version.lstrip("vV").strip()
 
@@ -31,15 +29,11 @@ def version_tuple(version: str):
 
 
 def get_latest_release_info():
-    """
-    Получает информацию о последнем релизе из GitHub.
-    Возвращает словарь или None.
-    """
     req = urllib.request.Request(
         API_URL,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": "ManulDesktopPet"
+            "User-Agent": "DesktopPetUpdater"
         }
     )
 
@@ -53,7 +47,7 @@ def get_latest_release_info():
 
         asset_url = None
         for asset in assets:
-            if asset.get("name") == ASSET_NAME:
+            if asset.get("name") == ZIP_ASSET_NAME:
                 asset_url = asset.get("browser_download_url")
                 break
 
@@ -64,7 +58,7 @@ def get_latest_release_info():
             "version": normalize_version(tag_name),
             "tag_name": tag_name,
             "body": body,
-            "asset_url": asset_url
+            "asset_url": asset_url,
         }
 
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
@@ -72,12 +66,6 @@ def get_latest_release_info():
 
 
 def is_update_available():
-    """
-    Возвращает:
-      (True, info)  -> если обновление есть
-      (False, info) -> если обновления нет
-      (False, None) -> если не удалось проверить
-    """
     info = get_latest_release_info()
     if info is None:
         return False, None
@@ -88,51 +76,83 @@ def is_update_available():
     return latest > current, info
 
 
-def download_update(asset_url: str):
-    """
-    Скачивает файл обновления во временную папку.
-    Возвращает путь к файлу или None.
-    """
+def download_zip(asset_url: str) -> str | None:
     if not asset_url:
         return None
 
-    target_path = os.path.join(tempfile.gettempdir(), ASSET_NAME)
+    temp_dir = tempfile.gettempdir()
+    zip_path = os.path.join(temp_dir, ZIP_ASSET_NAME)
 
     req = urllib.request.Request(
         asset_url,
-        headers={
-            "User-Agent": "ManulDesktopPet"
-        }
+        headers={"User-Agent": "DesktopPetUpdater"}
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            with open(target_path, "wb") as f:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            with open(zip_path, "wb") as f:
                 f.write(response.read())
-        return target_path
+        return zip_path
     except urllib.error.URLError:
         return None
 
 
-def run_installer(installer_path: str):
-    """
-    Запускает скачанный установщик.
-    """
-    if installer_path and os.path.exists(installer_path):
-        subprocess.Popen([installer_path], shell=True)
+def extract_zip(zip_path: str) -> str | None:
+    if not os.path.exists(zip_path):
+        return None
+
+    extract_dir = os.path.join(tempfile.gettempdir(), "DesktopPet_update")
+    if os.path.exists(extract_dir):
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+    os.makedirs(extract_dir, exist_ok=True)
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+        return extract_dir
+    except zipfile.BadZipFile:
+        return None
 
 
-# -----------------------------
-# ГЛАВНАЯ ФУНКЦИЯ ДЛЯ ВЫЗОВА ИЗ UI
-# -----------------------------
+def get_current_app_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def create_update_script(source_dir: Path, target_dir: Path, exe_name: str) -> Path:
+    script_path = Path(tempfile.gettempdir()) / "desktoppet_apply_update.bat"
+
+    script = f"""@echo off
+chcp 65001 >nul
+echo Applying update...
+timeout /t 2 /nobreak >nul
+robocopy "{source_dir}" "{target_dir}" /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NP
+start "" "{target_dir / exe_name}"
+exit
+"""
+
+    script_path.write_text(script, encoding="utf-8")
+    return script_path
+
+
+def run_update_script(script_path: Path):
+    subprocess.Popen(
+        ["cmd", "/c", str(script_path)],
+        creationflags=subprocess.CREATE_NO_WINDOW
+    )
+
+
 def check_for_updates(parent=None):
-    """
-    Полный сценарий:
-    - проверка версии
-    - предложение скачать
-    - скачивание
-    - запуск установщика
-    """
+    if not getattr(sys, "frozen", False):
+        QMessageBox.information(
+            parent,
+            "Обновления",
+            "Проверка обновлений работает только в собранной версии приложения."
+        )
+        return
+
     has_update, info = is_update_available()
 
     if info is None:
@@ -151,9 +171,7 @@ def check_for_updates(parent=None):
         )
         return
 
-    notes = info.get("body", "").strip()
-    if not notes:
-        notes = "Описание обновления отсутствует."
+    notes = info.get("body", "").strip() or "Описание обновления отсутствует."
 
     reply = QMessageBox.question(
         parent,
@@ -172,12 +190,12 @@ def check_for_updates(parent=None):
         QMessageBox.warning(
             parent,
             "Ошибка",
-            "В последнем релизе не найден файл обновления."
+            f"В последнем релизе не найден файл {ZIP_ASSET_NAME}."
         )
         return
 
-    installer_path = download_update(asset_url)
-    if not installer_path:
+    zip_path = download_zip(asset_url)
+    if not zip_path:
         QMessageBox.warning(
             parent,
             "Ошибка",
@@ -185,10 +203,32 @@ def check_for_updates(parent=None):
         )
         return
 
+    extracted_dir = extract_zip(zip_path)
+    if not extracted_dir:
+        QMessageBox.warning(
+            parent,
+            "Ошибка",
+            "Не удалось распаковать обновление."
+        )
+        return
+
+    current_app_dir = get_current_app_dir()
+    exe_name = Path(sys.executable).name
+
+    script_path = create_update_script(
+        source_dir=Path(extracted_dir),
+        target_dir=current_app_dir,
+        exe_name=exe_name
+    )
+
     QMessageBox.information(
         parent,
         "Обновление загружено",
-        "Установщик сейчас запустится."
+        "Приложение сейчас закроется, обновится и запустится снова."
     )
-    run_installer(installer_path)
 
+    run_update_script(script_path)
+
+    app = QApplication.instance()
+    if app is not None:
+        app.quit()

@@ -1,29 +1,42 @@
 ﻿import sys
 import os
 import random
+from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QMenu
 from PyQt6.QtGui import QPixmap, QAction, QGuiApplication
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from updater import check_for_updates
 
+
+def get_resource_base_dir():
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
 class FrameAnimatedPet(QWidget):
     def __init__(self):
         super().__init__()
-        
+
         self.target_width = 200
         self.gravity_speed = 0
         self.is_falling = False
-        
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        self.assets_path = 'assets'
-        self.current_state = 'idle'
+        self.assets_path = str(get_resource_base_dir() / "assets")
+
+        self.current_state = "idle"
         self.current_frame_index = 0
         self.frames = []
-        
+
         self.label = QLabel(self)
-        
+
         self.load_frames(self.current_state)
         self.update_frame()
         self.resize_to_frame()
@@ -38,22 +51,22 @@ class FrameAnimatedPet(QWidget):
 
         self.gravity_timer = QTimer(self)
         self.gravity_timer.timeout.connect(self.apply_gravity)
-        self.gravity_timer.start(20) 
+        self.gravity_timer.start(20)
 
         self.init_position()
-        
+
         self.show()
 
     def init_position(self):
         screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+
         screen_rect = screen.availableGeometry()
-        
-        sw = screen_rect.width()
-        sh = screen_rect.height()
-        
-        start_x = (sw - self.width()) // 2
-        self.ground_y = sh - self.height()
-        
+
+        start_x = screen_rect.x() + (screen_rect.width() - self.width()) // 2
+        self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
+
         self.move(start_x, self.ground_y)
 
     def apply_gravity(self):
@@ -63,12 +76,12 @@ class FrameAnimatedPet(QWidget):
         if self.y() < self.ground_y:
             self.gravity_speed += 2
             new_y = self.y() + self.gravity_speed
-            
+
             if new_y >= self.ground_y:
                 new_y = self.ground_y
                 self.is_falling = False
                 self.gravity_speed = 0
-            
+
             self.move(self.x(), new_y)
         else:
             self.is_falling = False
@@ -77,19 +90,27 @@ class FrameAnimatedPet(QWidget):
     def load_frames(self, state_name):
         self.frames = []
         path = os.path.join(self.assets_path, state_name)
+
         if not os.path.exists(path):
             return
 
-        files = sorted([f for f in os.listdir(path) if f.endswith('.png')])
+        files = sorted([f for f in os.listdir(path) if f.endswith(".png")])
+
         for file in files:
-            pixmap = QPixmap(os.path.join(path, file))
+            full_path = os.path.join(path, file)
+            pixmap = QPixmap(full_path)
+
+            if pixmap.isNull():
+                continue
+
             scaled_pixmap = pixmap.scaled(
-                self.target_width, 
-                self.target_width, 
-                Qt.AspectRatioMode.KeepAspectRatio, 
-                Qt.TransformationMode.SmoothTransformation
+                self.target_width,
+                self.target_width,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
             self.frames.append(scaled_pixmap)
+
         self.current_frame_index = 0
 
     def update_frame(self):
@@ -119,27 +140,34 @@ class FrameAnimatedPet(QWidget):
         if self.is_falling:
             return
 
-        choices = ['idle', 'walk']
+        choices = ["idle", "walk"]
         weights = [0.7, 0.3]
         new_action = random.choices(choices, weights=weights)[0]
         self.set_state(new_action)
 
-        if new_action == 'walk':
+        if new_action == "walk":
             direction = random.choice([-1, 1])
             step = direction * random.randint(30, 70)
             new_x = self.x() + step
-            
-            screen_width = QGuiApplication.primaryScreen().availableGeometry().width()
-            if 0 < new_x < (screen_width - self.width()):
-                self.move(new_x, self.ground_y)
 
+            screen = QGuiApplication.primaryScreen()
+            if screen is None:
+                return
+
+            screen_rect = screen.availableGeometry()
+
+            min_x = screen_rect.x()
+            max_x = screen_rect.x() + screen_rect.width() - self.width()
+
+            if min_x < new_x < max_x:
+                self.move(new_x, self.ground_y)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_falling = False
             self.gravity_speed = 0
             self.old_pos = event.globalPosition().toPoint()
-            self.set_state('idle')
+            self.set_state("idle")
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton:
@@ -152,7 +180,6 @@ class FrameAnimatedPet(QWidget):
             if self.y() < self.ground_y:
                 self.is_falling = True
 
-    
     def contextMenuEvent(self, event):
         menu = QMenu(self)
 
@@ -169,7 +196,7 @@ class FrameAnimatedPet(QWidget):
         menu.exec(event.globalPos())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app = QApplication(sys.argv)
     pet = FrameAnimatedPet()
     sys.exit(app.exec())
