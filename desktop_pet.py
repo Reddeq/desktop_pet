@@ -4,14 +4,14 @@ import random
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QMenu
 from PyQt6.QtGui import QPixmap, QAction, QGuiApplication
 from PyQt6.QtCore import Qt, QTimer, QPoint
+from updater import check_for_updates
 
 class FrameAnimatedPet(QWidget):
     def __init__(self):
         super().__init__()
         
-        # 1. КОНСТАНТЫ И НАСТРОЙКИ
         self.target_width = 200
-        self.gravity_speed = 0 # Текущая скорость падения
+        self.gravity_speed = 0
         self.is_falling = False
         
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
@@ -24,58 +24,46 @@ class FrameAnimatedPet(QWidget):
         
         self.label = QLabel(self)
         
-        # Загрузка графики
         self.load_frames(self.current_state)
         self.update_frame()
         self.resize_to_frame()
 
-        # 2. ТАЙМЕРЫ
-        # Анимация
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self.next_frame)
-        self.anim_timer.start(200)
+        self.anim_timer.start(50)
 
-        # Мозг (логика)
         self.logic_timer = QTimer(self)
         self.logic_timer.timeout.connect(self.pet_logic)
         self.logic_timer.start(5000)
 
-        # Физика (гравитация) - работает очень быстро для плавности (30 FPS)
         self.gravity_timer = QTimer(self)
         self.gravity_timer.timeout.connect(self.apply_gravity)
-        self.gravity_timer.start(33) 
+        self.gravity_timer.start(20) 
 
-        # 3. ПОЗИЦИОНИРОВАНИЕ (Теперь вызывается при старте!)
         self.init_position()
         
         self.show()
 
     def init_position(self):
-        """Определяет 'землю' и ставит манула на панель задач"""
         screen = QGuiApplication.primaryScreen()
         screen_rect = screen.availableGeometry()
         
         sw = screen_rect.width()
         sh = screen_rect.height()
         
-        # Центр экрана по горизонтали
         start_x = (sw - self.width()) // 2
-        # Уровень панели задач
         self.ground_y = sh - self.height()
         
         self.move(start_x, self.ground_y)
 
     def apply_gravity(self):
-        """Простая физика падения"""
         if not self.is_falling:
             return
 
-        # Если мы выше земли — падаем
         if self.y() < self.ground_y:
-            self.gravity_speed += 2 # Ускорение
+            self.gravity_speed += 2
             new_y = self.y() + self.gravity_speed
             
-            # Проверка, чтобы не провалиться под землю
             if new_y >= self.ground_y:
                 new_y = self.ground_y
                 self.is_falling = False
@@ -128,7 +116,6 @@ class FrameAnimatedPet(QWidget):
             self.update_frame()
 
     def pet_logic(self):
-        # Если манул падает, он не может гулять
         if self.is_falling:
             return
 
@@ -138,7 +125,6 @@ class FrameAnimatedPet(QWidget):
         self.set_state(new_action)
 
         if new_action == 'walk':
-            # Шаг влево или вправо
             direction = random.choice([-1, 1])
             step = direction * random.randint(30, 70)
             new_x = self.x() + step
@@ -147,11 +133,10 @@ class FrameAnimatedPet(QWidget):
             if 0 < new_x < (screen_width - self.width()):
                 self.move(new_x, self.ground_y)
 
-    # --- СОБЫТИЯ МЫШИ ---
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.is_falling = False # Останавливаем гравитацию, пока держим
+            self.is_falling = False
             self.gravity_speed = 0
             self.old_pos = event.globalPosition().toPoint()
             self.set_state('idle')
@@ -164,16 +149,25 @@ class FrameAnimatedPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Если отпустили выше уровня земли — включаем гравитацию
             if self.y() < self.ground_y:
                 self.is_falling = True
 
+    
     def contextMenuEvent(self, event):
         menu = QMenu(self)
+
+        update_action = QAction("Проверить обновления", self)
+        update_action.triggered.connect(lambda: check_for_updates(self))
+        menu.addAction(update_action)
+
+        menu.addSeparator()
+
         exit_action = QAction("Убрать манула", self)
         exit_action.triggered.connect(QApplication.instance().quit)
         menu.addAction(exit_action)
+
         menu.exec(event.globalPos())
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
