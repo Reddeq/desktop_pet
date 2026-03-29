@@ -3,7 +3,7 @@ import os
 import random
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QMenu
-from PyQt6.QtGui import QPixmap, QAction, QGuiApplication, QTransform
+from PyQt6.QtGui import QPixmap, QAction, QGuiApplication, QTransform, QPainter
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from updater import check_for_updates
 
@@ -17,11 +17,18 @@ def get_resource_base_dir():
 class FrameAnimatedPet(QWidget):
     def __init__(self):
         super().__init__()
+                
+        self.canvas_width = 220
+        self.canvas_height = 220
+        self.pet_render_height = 150
 
-        self.target_width = 200
         self.gravity_speed = 0
         self.is_falling = False
         self.facing_right = True
+        self.is_walking = False
+        self.walk_direction = 1
+        self.walk_target_x = 0
+        self.walk_speed = 4
         
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -53,6 +60,10 @@ class FrameAnimatedPet(QWidget):
         self.gravity_timer = QTimer(self)
         self.gravity_timer.timeout.connect(self.apply_gravity)
         self.gravity_timer.start(20)
+
+        self.walk_timer = QTimer(self)
+        self.walk_timer.timeout.connect(self.process_walk_step)
+        self.walk_timer.start(16)
 
         self.init_position()
 
@@ -100,20 +111,29 @@ class FrameAnimatedPet(QWidget):
             if pixmap.isNull():
                 continue
 
-            scaled_pixmap = pixmap.scaled(
-                self.target_width,
-                self.target_width,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-
             if state_name in {"walk", "idle"} and not self.facing_right:
-                scaled_pixmap = scaled_pixmap.transformed(
+                pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),
                     Qt.TransformationMode.SmoothTransformation
                 )
 
-            self.frames.append(scaled_pixmap)
+            scaled_pixmap = pixmap.scaledToHeight(
+                self.pet_render_height,
+                Qt.TransformationMode.SmoothTransformation
+            )
+
+            canvas = QPixmap(self.canvas_width, self.canvas_height)
+            canvas.fill(Qt.GlobalColor.transparent)
+
+            painter = QPainter(canvas)
+
+            x = (self.canvas_width - scaled_pixmap.width()) // 2
+            y = self.canvas_height - scaled_pixmap.height()
+
+            painter.drawPixmap(x, y, scaled_pixmap)
+            painter.end()
+
+            self.frames.append(canvas)
 
         self.current_frame_index = 0
     
@@ -141,7 +161,7 @@ class FrameAnimatedPet(QWidget):
             self.update_frame()
 
     def pet_logic(self):
-        if self.is_falling:
+        if self.is_falling or self.is_walking:
             return
 
         choices = ["idle", "walk"]
@@ -150,15 +170,22 @@ class FrameAnimatedPet(QWidget):
 
         if new_action == "walk":
             direction = random.choice([-1, 1])
+            distance = random.randint(60, 180)
 
+            self.walk_direction = direction
             self.facing_right = (direction == 1)
 
             self.set_state("walk")
 
-            step = direction * random.randint(30, 70)
-            new_x = self.x() + step
-            new_x, new_y = self.clamp_position(new_x, self.ground_y)
-            self.move(new_x, new_y)
+            target_x = self.x() + (direction * distance)
+            target_x, _ = self.clamp_position(target_x, self.ground_y)
+
+            if target_x == self.x():
+                self.set_state("idle")
+                return
+
+            self.walk_target_x = target_x
+            self.is_walking = True
 
         else:
             self.set_state("idle")
@@ -167,6 +194,9 @@ class FrameAnimatedPet(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_falling = False
             self.gravity_speed = 0
+
+            self.is_walking = False
+
             self.old_pos = event.globalPosition().toPoint()
             self.set_state("idle")
 
@@ -227,6 +257,24 @@ class FrameAnimatedPet(QWidget):
         y = max(min_y, min(y, max_y))
 
         return x, y
+
+    def process_walk_step(self):
+        if not self.is_walking:
+            return
+
+        current_x = self.x()
+
+        if self.walk_direction == 1:
+            new_x = min(current_x + self.walk_speed, self.walk_target_x)
+        else:
+            new_x = max(current_x - self.walk_speed, self.walk_target_x)
+
+        new_x, new_y = self.clamp_position(new_x, self.ground_y)
+        self.move(new_x, new_y)
+
+        if new_x == self.walk_target_x:
+            self.is_walking = False
+            self.set_state("idle")
 
 
 if __name__ == "__main__":
