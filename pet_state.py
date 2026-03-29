@@ -6,3 +6,4 @@ class PetState(str, Enum):
     WALK = "walk"
     FALLING = "falling"
     FALLING_RECOVERY = "falling_recovery"
+    CLEANING = "cleaning"

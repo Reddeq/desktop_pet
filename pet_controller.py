@@ -15,6 +15,7 @@ class PetController(QObject):
         self.is_walking = False
         self.is_dragging = False
         self.is_recovering = False
+        self.is_cleaning = False
 
         self.walk_direction = 1
         self.walk_target_x = 0
@@ -31,6 +32,10 @@ class PetController(QObject):
         self.walk_timer = QTimer(self)
         self.walk_timer.timeout.connect(self.process_walk_step)
 
+        self.cleaning_timer = QTimer(self)
+        self.cleaning_timer.setSingleShot(True)
+        self.cleaning_timer.timeout.connect(self.finish_cleaning)
+
     def start(self):
         self.logic_timer.start(5000)
         self.gravity_timer.start(20)
@@ -40,6 +45,7 @@ class PetController(QObject):
         self.logic_timer.stop()
         self.gravity_timer.stop()
         self.walk_timer.stop()
+        self.cleaning_timer.stop()
 
     def on_animation_finished(self, animation_name: str):
         try:
@@ -50,11 +56,16 @@ class PetController(QObject):
         if state == PetState.FALLING_RECOVERY and self.is_recovering:
             self.finish_fall_recovery()
 
+    def _stop_cleaning(self):
+        self.is_cleaning = False
+        self.cleaning_timer.stop()
+
     def _reset_motion_flags(self):
         self.is_falling = False
         self.gravity_speed = 0
         self.is_walking = False
         self.is_recovering = False
+        self._stop_cleaning()
 
     def _start_walk(self, direction: int, distance: int):
         self.walk_direction = direction
@@ -77,18 +88,37 @@ class PetController(QObject):
         self.pet.move(self.pet.x(), self.pet.ground_y)
         self.start_fall_recovery()
 
-    def pet_logic(self):
-        if self.is_falling or self.is_walking or self.is_dragging or self.is_recovering:
+    def start_cleaning(self):
+        self.is_cleaning = True
+        self.pet.set_state(PetState.CLEANING)
+
+        if not self.pet.animation_player.has_frames():
+            self.finish_cleaning()
             return
 
-        choices = [PetState.IDLE, PetState.WALK]
-        weights = [0.7, 0.3]
+        duration_ms = random.randint(2000, 5000)
+        self.cleaning_timer.start(duration_ms)
+
+    def finish_cleaning(self):
+        self.is_cleaning = False
+        self.pet.set_state(PetState.IDLE)
+
+    def pet_logic(self):
+        if self.is_falling or self.is_walking or self.is_dragging or self.is_recovering or self.is_cleaning:
+            return
+
+        choices = [PetState.IDLE, PetState.WALK, PetState.CLEANING]
+        weights = [0.55, 0.25, 0.20]
         new_action = random.choices(choices, weights=weights)[0]
 
         if new_action == PetState.WALK:
             direction = random.choice([-1, 1])
             distance = random.randint(60, 180)
             self._start_walk(direction, distance)
+
+        elif new_action == PetState.CLEANING:
+            self.start_cleaning()
+
         else:
             self.pet.set_state(PetState.IDLE)
 
@@ -137,14 +167,12 @@ class PetController(QObject):
         self.is_recovering = False
         self.pet.set_state(PetState.IDLE)
 
-
     def on_mouse_press(self, global_pos):
         self._reset_motion_flags()
         self.is_dragging = True
 
         self.old_pos = global_pos.toPoint()
         self.pet.set_state(PetState.FALLING)
-
 
     def on_mouse_move(self, global_pos):
         if self.old_pos is None:

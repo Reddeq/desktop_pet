@@ -30,15 +30,15 @@ class AnimationPlayer(QObject):
         self.frames = []
         self.facing_right = True
 
-        # Какие анимации крутятся по кругу, а какие проигрываются один раз
         self.loop_map = {
             "idle": True,
             "walk": True,
             "falling": True,
             "falling_recovery": False,
+            "cleaning": True,
+
         }
 
-        # Чтобы animation_finished не стрелял много раз подряд
         self._finished_emitted = False
 
         self.timer = QTimer(self)
@@ -58,7 +58,6 @@ class AnimationPlayer(QObject):
         if self.facing_right != value:
             self.facing_right = value
 
-            # Перезагружаем текущую анимацию, чтобы она отзеркалилась
             if self.current_animation is not None:
                 self.set_animation(self.current_animation, force=True)
 
@@ -84,7 +83,6 @@ class AnimationPlayer(QObject):
         if not self.frames:
             return
 
-        # Если кадр всего один
         if len(self.frames) == 1:
             self.frame_changed.emit(self.frames[0])
 
@@ -93,18 +91,15 @@ class AnimationPlayer(QObject):
                 self.animation_finished.emit(self.current_animation)
             return
 
-        # Циклические анимации
         if self._is_looping(self.current_animation):
             self.current_frame_index = (self.current_frame_index + 1) % len(self.frames)
             self.frame_changed.emit(self.frames[self.current_frame_index])
             return
 
-        # Одноразовые анимации
         if self.current_frame_index < len(self.frames) - 1:
             self.current_frame_index += 1
             self.frame_changed.emit(self.frames[self.current_frame_index])
         else:
-            # Остаёмся на последнем кадре
             self.frame_changed.emit(self.frames[self.current_frame_index])
 
             if not self._finished_emitted:
@@ -127,20 +122,17 @@ class AnimationPlayer(QObject):
             if pixmap.isNull():
                 continue
 
-            # Зеркалим состояния, зависящие от направления
-            if animation_name in {"idle", "walk", "falling", "falling_recovery"} and not self.facing_right:
+            if animation_name in {"idle", "walk", "falling", "falling_recovery", "cleaning"} and not self.facing_right:
                 pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),
                     Qt.TransformationMode.SmoothTransformation,
                 )
 
-            # Приводим персонажа к фиксированной визуальной высоте
             scaled_pixmap = pixmap.scaledToHeight(
                 self.pet_render_height,
                 Qt.TransformationMode.SmoothTransformation,
             )
 
-            # Рисуем его на прозрачный холст фиксированного размера
             canvas = QPixmap(self.canvas_width, self.canvas_height)
             canvas.fill(Qt.GlobalColor.transparent)
 
