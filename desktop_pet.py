@@ -41,8 +41,8 @@ class FrameAnimatedPet(QWidget):
         self.label.resize(self.canvas_width, self.canvas_height)
         self.resize(self.canvas_width, self.canvas_height)
 
-        self.setWindowIcon(QIcon(str(self.icon_path)))
-
+        if self.icon_path.exists():
+            self.setWindowIcon(QIcon(str(self.icon_path)))
 
         self.animation_player = AnimationPlayer(
             assets_path=self.assets_path,
@@ -124,6 +124,12 @@ class FrameAnimatedPet(QWidget):
         update_action = QAction("Проверить обновления", self)
         update_action.triggered.connect(lambda: check_for_updates(self))
         menu.addAction(update_action)
+
+        simulate_notice_action = QAction("Симулировать уведомление", self)
+        simulate_notice_action.triggered.connect(
+            self.controller.start_notification_investigation
+        )
+        menu.addAction(simulate_notice_action)
 
         menu.addSeparator()
 

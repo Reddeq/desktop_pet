@@ -16,6 +16,7 @@ class PetController(QObject):
         self.is_dragging = False
         self.is_recovering = False
         self.is_cleaning = False
+        self.is_investigating_notifications = False
 
         self.walk_direction = 1
         self.walk_target_x = 0
@@ -36,6 +37,10 @@ class PetController(QObject):
         self.cleaning_timer.setSingleShot(True)
         self.cleaning_timer.timeout.connect(self.finish_cleaning)
 
+        self.dig_timer = QTimer(self)
+        self.dig_timer.setSingleShot(True)
+        self.dig_timer.timeout.connect(self.finish_notification_investigation)
+
     def start(self):
         self.logic_timer.start(5000)
         self.gravity_timer.start(20)
@@ -46,6 +51,7 @@ class PetController(QObject):
         self.gravity_timer.stop()
         self.walk_timer.stop()
         self.cleaning_timer.stop()
+        self.dig_timer.stop()
 
     def on_animation_finished(self, animation_name: str):
         try:
@@ -55,10 +61,19 @@ class PetController(QObject):
 
         if state == PetState.FALLING_RECOVERY and self.is_recovering:
             self.finish_fall_recovery()
+            return
+
+        if state == PetState.ALERT and self.is_investigating_notifications:
+            self.go_to_notification_area()
+            return
 
     def _stop_cleaning(self):
         self.is_cleaning = False
         self.cleaning_timer.stop()
+
+    def _stop_notification_investigation(self):
+        self.is_investigating_notifications = False
+        self.dig_timer.stop()
 
     def _reset_motion_flags(self):
         self.is_falling = False
@@ -66,6 +81,7 @@ class PetController(QObject):
         self.is_walking = False
         self.is_recovering = False
         self._stop_cleaning()
+        self._stop_notification_investigation()
 
     def _start_walk(self, direction: int, distance: int):
         self.walk_direction = direction
@@ -88,6 +104,15 @@ class PetController(QObject):
         self.pet.move(self.pet.x(), self.pet.ground_y)
         self.start_fall_recovery()
 
+    def _get_tray_target_x(self):
+        """
+        Примерная X-координата у правого нижнего угла экрана.
+        Это имитация области уведомлений, а не реальный tray API.
+        """
+        screen_rect = self.pet.get_current_screen_rect()
+        margin = 40
+        return screen_rect.x() + screen_rect.width() - self.pet.width() - margin
+
     def start_cleaning(self):
         self.is_cleaning = True
         self.pet.set_state(PetState.CLEANING)
@@ -103,21 +128,69 @@ class PetController(QObject):
         self.is_cleaning = False
         self.pet.set_state(PetState.IDLE)
 
-    def pet_logic(self):
-        if self.is_falling or self.is_walking or self.is_dragging or self.is_recovering or self.is_cleaning:
+    def start_notification_investigation(self):
+        self._reset_motion_flags()
+        self.is_investigating_notifications = True
+        self.pet.set_state(PetState.ALERT)
+
+        if not self.pet.animation_player.has_frames():
+            self.go_to_notification_area()
+
+    def go_to_notification_area(self):
+        tray_x = self._get_tray_target_x()
+        current_x = self.pet.x()
+
+        if tray_x == current_x:
+            self.start_dig()
             return
 
-        choices = [PetState.IDLE, PetState.WALK, PetState.CLEANING]
-        weights = [0.55, 0.25, 0.20]
-        new_action = random.choices(choices, weights=weights)[0]
+        direction = 1 if tray_x > current_x else -1
+        self.walk_direction = direction
+        self.walk_target_x = tray_x
+        self.is_walking = True
 
-        if new_action == PetState.WALK:
+        self.pet.set_facing_right(direction == 1)
+        self.pet.set_state(PetState.RUN)
+
+    def start_dig(self):
+        self.pet.set_state(PetState.DIG)
+
+        if not self.pet.animation_player.has_frames():
+            self.finish_notification_investigation()
+            return
+
+        duration_ms = random.randint(2000, 4000)
+        self.dig_timer.start(duration_ms)
+
+    def finish_notification_investigation(self):
+        self._stop_notification_investigation()
+        self.pet.set_state(PetState.IDLE)
+
+    def pet_logic(self):
+        if (
+            self.is_falling
+            or self.is_walking
+            or self.is_dragging
+            or self.is_recovering
+            or self.is_cleaning
+            or self.is_investigating_notifications
+        ):
+            return
+
+        actions = ["idle", "walk", "cleaning", "investigate_notifications"]
+        weights = [0.45, 0.25, 0.20, 0.10]
+        new_action = random.choices(actions, weights=weights)[0]
+
+        if new_action == "walk":
             direction = random.choice([-1, 1])
             distance = random.randint(60, 180)
             self._start_walk(direction, distance)
 
-        elif new_action == PetState.CLEANING:
+        elif new_action == "cleaning":
             self.start_cleaning()
+
+        elif new_action == "investigate_notifications":
+            self.start_notification_investigation()
 
         else:
             self.pet.set_state(PetState.IDLE)
@@ -138,7 +211,11 @@ class PetController(QObject):
 
         if new_x == self.walk_target_x:
             self.is_walking = False
-            self.pet.set_state(PetState.IDLE)
+
+            if self.is_investigating_notifications:
+                self.start_dig()
+            else:
+                self.pet.set_state(PetState.IDLE)
 
     def apply_gravity(self):
         if not self.is_falling:
