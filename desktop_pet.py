@@ -58,11 +58,7 @@ class FrameAnimatedPet(QWidget):
         self.show()
 
     def init_position(self):
-        screen = QGuiApplication.primaryScreen()
-        if screen is None:
-            return
-
-        screen_rect = screen.availableGeometry()
+        screen_rect = self.get_current_screen_rect()
 
         start_x = screen_rect.x() + (screen_rect.width() - self.width()) // 2
         self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
@@ -150,17 +146,9 @@ class FrameAnimatedPet(QWidget):
             step = direction * random.randint(30, 70)
             new_x = self.x() + step
 
-            screen = QGuiApplication.primaryScreen()
-            if screen is None:
-                return
+            new_x, new_y = self.clamp_position(new_x, self.ground_y)
 
-            screen_rect = screen.availableGeometry()
-
-            min_x = screen_rect.x()
-            max_x = screen_rect.x() + screen_rect.width() - self.width()
-
-            if min_x < new_x < max_x:
-                self.move(new_x, self.ground_y)
+            self.move(new_x, new_y)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -172,11 +160,20 @@ class FrameAnimatedPet(QWidget):
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton:
             delta = QPoint(event.globalPosition().toPoint() - self.old_pos)
-            self.move(self.x() + delta.x(), self.y() + delta.y())
+
+            new_x = self.x() + delta.x()
+            new_y = self.y() + delta.y()
+
+            new_x, new_y = self.clamp_position(new_x, new_y)
+
+            self.move(new_x, new_y)
             self.old_pos = event.globalPosition().toPoint()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
+            if self.y() > self.ground_y:
+                self.move(self.x(), self.ground_y)
+
             if self.y() < self.ground_y:
                 self.is_falling = True
 
@@ -194,6 +191,29 @@ class FrameAnimatedPet(QWidget):
         menu.addAction(exit_action)
 
         menu.exec(event.globalPos())
+
+    def get_current_screen_rect(self):
+        center_point = self.frameGeometry().center()
+        screen = QGuiApplication.screenAt(center_point)
+
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+
+        return screen.availableGeometry()
+
+    def clamp_position(self, x, y):
+        screen_rect = self.get_current_screen_rect()
+
+        min_x = screen_rect.x()
+        max_x = screen_rect.x() + screen_rect.width() - self.width()
+
+        min_y = screen_rect.y()
+        max_y = self.ground_y
+
+        x = max(min_x, min(x, max_x))
+        y = max(min_y, min(y, max_y))
+
+        return x, y
 
 
 if __name__ == "__main__":
