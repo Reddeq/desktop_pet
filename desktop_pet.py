@@ -3,7 +3,7 @@ import os
 import random
 from pathlib import Path
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QMenu
-from PyQt6.QtGui import QPixmap, QAction, QGuiApplication
+from PyQt6.QtGui import QPixmap, QAction, QGuiApplication, QTransform
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from updater import check_for_updates
 
@@ -21,7 +21,8 @@ class FrameAnimatedPet(QWidget):
         self.target_width = 200
         self.gravity_speed = 0
         self.is_falling = False
-
+        self.facing_right = True
+        
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -105,10 +106,17 @@ class FrameAnimatedPet(QWidget):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
+
+            if state_name in {"walk", "idle"} and not self.facing_right:
+                scaled_pixmap = scaled_pixmap.transformed(
+                    QTransform().scale(-1, 1),
+                    Qt.TransformationMode.SmoothTransformation
+                )
+
             self.frames.append(scaled_pixmap)
 
         self.current_frame_index = 0
-
+    
     def update_frame(self):
         if self.frames:
             pixmap = self.frames[self.current_frame_index]
@@ -139,16 +147,21 @@ class FrameAnimatedPet(QWidget):
         choices = ["idle", "walk"]
         weights = [0.7, 0.3]
         new_action = random.choices(choices, weights=weights)[0]
-        self.set_state(new_action)
 
         if new_action == "walk":
             direction = random.choice([-1, 1])
+
+            self.facing_right = (direction == 1)
+
+            self.set_state("walk")
+
             step = direction * random.randint(30, 70)
             new_x = self.x() + step
-
             new_x, new_y = self.clamp_position(new_x, self.ground_y)
-
             self.move(new_x, new_y)
+
+        else:
+            self.set_state("idle")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
