@@ -22,11 +22,9 @@ class FrameAnimatedPet(QWidget):
     def __init__(self):
         super().__init__()
 
-        self.canvas_width = 220
-        self.canvas_height = 220
-        self.pet_render_height = 150
-
+        self.scale_factor = 0.3
         self.current_state = None
+        self._position_initialized = False
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -51,9 +49,6 @@ class FrameAnimatedPet(QWidget):
             self.feed_cursor = QCursor(Qt.CursorShape.PointingHandCursor)
 
         self.label = QLabel(self)
-        self.label.resize(self.canvas_width, self.canvas_height)
-        self.resize(self.canvas_width, self.canvas_height)
-
         self.label.installEventFilter(self)
 
         if self.icon_path.exists():
@@ -61,30 +56,42 @@ class FrameAnimatedPet(QWidget):
 
         self.animation_player = AnimationPlayer(
             assets_path=self.assets_path,
-            canvas_width=self.canvas_width,
-            canvas_height=self.canvas_height,
-            pet_render_height=self.pet_render_height,
+            scale_factor=self.scale_factor,
             frame_interval=50,
             parent=self,
         )
         self.animation_player.frame_changed.connect(self.on_frame_changed)
         self.animation_player.animation_finished.connect(self.on_animation_finished)
 
-        self.init_position()
-
         self.controller = PetController(self, self)
         self.controller.start()
 
         self.set_state(PetState.IDLE, force=True)
+
+        self.init_position()
+        self._position_initialized = True
+
         self.show()
 
-
     def on_frame_changed(self, pixmap):
+        if self._position_initialized:
+            old_bottom = self.y() + self.height()
+        else:
+            old_bottom = None
+
         self.label.setPixmap(pixmap)
+        self.label.resize(pixmap.size())
+        self.resize(pixmap.size())
+
+        if self._position_initialized and old_bottom is not None:
+            new_y = old_bottom - self.height()
+            self.move(self.x(), new_y)
+
+            screen_rect = self.get_current_screen_rect()
+            self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
 
     def on_animation_finished(self, animation_name: str):
         self.controller.on_animation_finished(animation_name)
-
 
     def init_position(self):
         screen_rect = self.get_current_screen_rect()
@@ -115,7 +122,6 @@ class FrameAnimatedPet(QWidget):
 
         return x, y
 
-
     def set_state(self, new_state: PetState, force=False):
         if force or self.current_state != new_state:
             self.current_state = new_state
@@ -123,7 +129,6 @@ class FrameAnimatedPet(QWidget):
 
     def set_facing_right(self, value: bool):
         self.animation_player.set_facing_right(value)
-
 
     def cycle_interaction_mode(self, direction: int):
         modes = [
@@ -154,7 +159,6 @@ class FrameAnimatedPet(QWidget):
         else:
             self.unsetCursor()
 
-
     def eventFilter(self, obj, event):
         if obj is self.label:
             if event.type() == QEvent.Type.Enter:
@@ -177,8 +181,40 @@ class FrameAnimatedPet(QWidget):
                     event.accept()
                     return True
 
-        return super().eventFilter(obj, event)
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    if self.interaction_mode == InteractionMode.GRAB:
+                        self.setCursor(self.grab_drag_cursor)
+                        self.controller.on_mouse_press(event.globalPosition())
+                        return True
 
+                    if self.interaction_mode == InteractionMode.FEED:
+                        event.accept()
+                        return True
+
+            if event.type() == QEvent.Type.MouseMove:
+                if event.buttons() == Qt.MouseButton.LeftButton:
+                    if self.interaction_mode == InteractionMode.GRAB:
+                        self.controller.on_mouse_move(event.globalPosition())
+                        return True
+
+                    if self.interaction_mode == InteractionMode.FEED:
+                        event.accept()
+                        return True
+
+            if event.type() == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    if self.interaction_mode == InteractionMode.GRAB:
+                        self.controller.on_mouse_release()
+                        self.apply_interaction_cursor()
+                        return True
+
+                    if self.interaction_mode == InteractionMode.FEED:
+                        event.accept()
+                        self.apply_interaction_cursor()
+                        return True
+
+        return super().eventFilter(obj, event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -218,7 +254,6 @@ class FrameAnimatedPet(QWidget):
                 return
 
         super().mouseReleaseEvent(event)
-
 
     def contextMenuEvent(self, event):
         menu = QMenu(self)

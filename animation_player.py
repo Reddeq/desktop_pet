@@ -2,7 +2,7 @@
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QTransform, QPainter
+from PyQt6.QtGui import QPixmap, QTransform
 
 
 class AnimationPlayer(QObject):
@@ -12,18 +12,14 @@ class AnimationPlayer(QObject):
     def __init__(
         self,
         assets_path: str,
-        canvas_width: int,
-        canvas_height: int,
-        pet_render_height: int,
+        scale_factor: float = 0.5,
         frame_interval: int = 50,
         parent=None,
     ):
         super().__init__(parent)
 
         self.assets_path = Path(assets_path)
-        self.canvas_width = canvas_width
-        self.canvas_height = canvas_height
-        self.pet_render_height = pet_render_height
+        self.scale_factor = scale_factor
 
         self.current_animation = None
         self.current_frame_index = 0
@@ -133,27 +129,23 @@ class AnimationPlayer(QObject):
                 "alert",
                 "run",
                 "dig",
-                "swat"
+                "swat",
             } and not self.facing_right:
                 pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),
                     Qt.TransformationMode.SmoothTransformation,
                 )
 
-            scaled_pixmap = pixmap.scaledToHeight(
-                self.pet_render_height,
+            new_width = max(1, int(pixmap.width() * self.scale_factor))
+            new_height = max(1, int(pixmap.height() * self.scale_factor))
+
+            scaled_pixmap = pixmap.scaled(
+                new_width,
+                new_height,
+                Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
 
-            canvas = QPixmap(self.canvas_width, self.canvas_height)
-            canvas.fill(Qt.GlobalColor.transparent)
-
-            painter = QPainter(canvas)
-            x = (self.canvas_width - scaled_pixmap.width()) // 2
-            y = self.canvas_height - scaled_pixmap.height()
-            painter.drawPixmap(x, y, scaled_pixmap)
-            painter.end()
-
-            frames.append(canvas)
+            frames.append(scaled_pixmap)
 
         return frames
