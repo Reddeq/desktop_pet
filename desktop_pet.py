@@ -1,14 +1,15 @@
 ﻿import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QMenu
-from PyQt6.QtGui import QAction, QGuiApplication, QIcon, QCursor, QPixmap
+from PyQt6.QtWidgets import QApplication, QWidget, QLabel
+from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtCore import Qt, QEvent
 
-from updater import check_for_updates
 from animation_player import AnimationPlayer
+from interaction_cursors import InteractionCursorManager
 from interaction_mode import InteractionMode
 from pet_animator import PetAnimator
+from pet_context_menu import PetContextMenuManager
 from pet_controller import PetController
 from pet_state import PetState
 
@@ -34,20 +35,12 @@ class FrameAnimatedPet(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        base_dir = get_resource_base_dir()
-        self.assets_path = str(base_dir / "assets")
-        self.icon_path = base_dir / "assets" / "icon.ico"
+        self.base_dir = get_resource_base_dir()
+        self.assets_path = str(self.base_dir / "assets")
+        self.icon_path = self.base_dir / "assets" / "icon.ico"
 
-        self.interaction_mode = InteractionMode.GRAB
-
-        self.grab_cursor = QCursor(Qt.CursorShape.OpenHandCursor)
-        self.grab_drag_cursor = QCursor(Qt.CursorShape.ClosedHandCursor)
-
-        feed_cursor_path = base_dir / "assets" / "cursors" / "meat_cursor.png"
-        if feed_cursor_path.exists():
-            self.feed_cursor = QCursor(QPixmap(str(feed_cursor_path)), 0, 0)
-        else:
-            self.feed_cursor = QCursor(Qt.CursorShape.PointingHandCursor)
+        self.cursors = InteractionCursorManager(self.base_dir)
+        self.context_menu = PetContextMenuManager(self)
 
         self.label = QLabel(self)
         self.label.installEventFilter(self)
@@ -80,6 +73,7 @@ class FrameAnimatedPet(QWidget):
 
         self.show()
 
+
     def on_frame_changed(self, pixmap):
         if self._position_initialized:
             old_bottom = self.y() + self.height()
@@ -101,6 +95,7 @@ class FrameAnimatedPet(QWidget):
         self.animator.on_animation_finished(animation_name)
 
         self.controller.on_animation_finished(animation_name)
+
 
     def init_position(self):
         screen_rect = self.get_current_screen_rect()
@@ -131,6 +126,7 @@ class FrameAnimatedPet(QWidget):
 
         return x, y
 
+
     def set_state(self, new_state: PetState, force=False):
         if force or self.current_state != new_state:
             self.current_state = new_state
@@ -139,111 +135,74 @@ class FrameAnimatedPet(QWidget):
     def set_facing_right(self, value: bool):
         self.animation_player.set_facing_right(value)
 
-    def debug_print_needs(self):
-        needs = self.controller.needs.snapshot()
-
-        print("=== Потребности манула ===")
-        print(f"Состояние: {self.current_state}")
-        print(f"Сытость   (satiety): {needs['satiety']:.2f}")
-        print(f"Бодрость  (energy):  {needs['energy']:.2f}")
-        print(f"Настроение(mood):    {needs['mood']:.2f}")
-        print(f"Туалет    (bladder): {needs['bladder']:.2f}")
-        print("==========================")
-
-    def cycle_interaction_mode(self, direction: int):
-        modes = [
-            InteractionMode.GRAB,
-            InteractionMode.FEED,
-        ]
-
-        current_index = modes.index(self.interaction_mode)
-        new_index = (current_index + direction) % len(modes)
-
-        self.interaction_mode = modes[new_index]
-        self.apply_interaction_cursor()
-
-    def get_current_interaction_cursor(self) -> QCursor:
-        if self.interaction_mode == InteractionMode.FEED:
-            return self.feed_cursor
-
-        return self.grab_cursor
-
-    def is_cursor_over_pet(self) -> bool:
-        global_pos = QCursor.pos()
-        local_pos = self.mapFromGlobal(global_pos)
-        return self.rect().contains(local_pos)
-
-    def apply_interaction_cursor(self):
-        if self.is_cursor_over_pet():
-            self.setCursor(self.get_current_interaction_cursor())
-        else:
-            self.unsetCursor()
 
     def eventFilter(self, obj, event):
         if obj is self.label:
             if event.type() == QEvent.Type.Enter:
-                self.apply_interaction_cursor()
+                self.cursors.apply_to_widget(self)
                 return False
 
             if event.type() == QEvent.Type.Leave:
-                self.unsetCursor()
+                self.cursors.clear_from_widget(self)
                 return False
 
             if event.type() == QEvent.Type.Wheel:
-                if self.is_cursor_over_pet():
+                if self.cursors.is_cursor_over_widget(self):
                     delta_y = event.angleDelta().y()
 
                     if delta_y > 0:
-                        self.cycle_interaction_mode(+1)
+                        self.cursors.cycle_mode(+1)
                     elif delta_y < 0:
-                        self.cycle_interaction_mode(-1)
+                        self.cursors.cycle_mode(-1)
 
+                    self.cursors.apply_to_widget(self)
                     event.accept()
                     return True
 
             if event.type() == QEvent.Type.MouseButtonPress:
                 if event.button() == Qt.MouseButton.LeftButton:
-                    if self.interaction_mode == InteractionMode.GRAB:
-                        self.setCursor(self.grab_drag_cursor)
+                    if self.cursors.current_mode() == InteractionMode.GRAB:
+                        self.setCursor(self.cursors.get_drag_cursor())
                         self.controller.on_mouse_press(event.globalPosition())
                         return True
 
-                    if self.interaction_mode == InteractionMode.FEED:
+                    if self.cursors.current_mode() == InteractionMode.FEED:
                         event.accept()
                         return True
 
             if event.type() == QEvent.Type.MouseMove:
                 if event.buttons() == Qt.MouseButton.LeftButton:
-                    if self.interaction_mode == InteractionMode.GRAB:
+                    if self.cursors.current_mode() == InteractionMode.GRAB:
                         self.controller.on_mouse_move(event.globalPosition())
                         return True
 
-                    if self.interaction_mode == InteractionMode.FEED:
+                    if self.cursors.current_mode() == InteractionMode.FEED:
                         event.accept()
                         return True
 
             if event.type() == QEvent.Type.MouseButtonRelease:
                 if event.button() == Qt.MouseButton.LeftButton:
-                    if self.interaction_mode == InteractionMode.GRAB:
+                    if self.cursors.current_mode() == InteractionMode.GRAB:
                         self.controller.on_mouse_release()
-                        self.apply_interaction_cursor()
+                        self.cursors.apply_to_widget(self)
                         return True
 
-                    if self.interaction_mode == InteractionMode.FEED:
+                    if self.cursors.current_mode() == InteractionMode.FEED:
                         event.accept()
-                        self.apply_interaction_cursor()
+                        self.cursors.apply_to_widget(self)
                         return True
 
         return super().eventFilter(obj, event)
 
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.interaction_mode == InteractionMode.GRAB:
-                self.setCursor(self.grab_drag_cursor)
+            if self.cursors.current_mode() == InteractionMode.GRAB:
+                self.setCursor(self.cursors.get_drag_cursor())
                 self.controller.on_mouse_press(event.globalPosition())
                 return
 
-            if self.interaction_mode == InteractionMode.FEED:
+            if self.cursors.current_mode() == InteractionMode.FEED:
                 event.accept()
                 return
 
@@ -251,11 +210,11 @@ class FrameAnimatedPet(QWidget):
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton:
-            if self.interaction_mode == InteractionMode.GRAB:
+            if self.cursors.current_mode() == InteractionMode.GRAB:
                 self.controller.on_mouse_move(event.globalPosition())
                 return
 
-            if self.interaction_mode == InteractionMode.FEED:
+            if self.cursors.current_mode() == InteractionMode.FEED:
                 event.accept()
                 return
 
@@ -263,42 +222,21 @@ class FrameAnimatedPet(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.interaction_mode == InteractionMode.GRAB:
+            if self.cursors.current_mode() == InteractionMode.GRAB:
                 self.controller.on_mouse_release()
-                self.apply_interaction_cursor()
+                self.cursors.apply_to_widget(self)
                 return
 
-            if self.interaction_mode == InteractionMode.FEED:
+            if self.cursors.current_mode() == InteractionMode.FEED:
                 event.accept()
-                self.apply_interaction_cursor()
+                self.cursors.apply_to_widget(self)
                 return
 
         super().mouseReleaseEvent(event)
 
+
     def contextMenuEvent(self, event):
-        menu = QMenu(self)
-
-        update_action = QAction("Проверить обновления", self)
-        update_action.triggered.connect(lambda: check_for_updates(self))
-        menu.addAction(update_action)
-
-        simulate_notice_action = QAction("Симулировать уведомление", self)
-        simulate_notice_action.triggered.connect(
-            self.controller.start_notification_investigation
-        )
-        menu.addAction(simulate_notice_action)
-
-        show_needs_action = QAction("Показать потребности", self)
-        show_needs_action.triggered.connect(self.debug_print_needs)
-        menu.addAction(show_needs_action)
-
-        menu.addSeparator()
-
-        exit_action = QAction("Убрать манула", self)
-        exit_action.triggered.connect(QApplication.instance().quit)
-        menu.addAction(exit_action)
-
-        menu.exec(event.globalPos())
+        self.context_menu.show(event.globalPos())
 
 
 if __name__ == "__main__":
