@@ -105,6 +105,11 @@ class PetCursorAI(QObject):
         max_y = self.pet.y() + self.pet.height()
         return min_y <= cursor_pos.y() <= max_y
 
+    def _face_cursor(self, cursor_pos: QPoint):
+        desired_facing_right = cursor_pos.x() >= self.pet.x() + self.pet.width() // 2
+        if self.pet.animation_player.facing_right != desired_facing_right:
+            self.pet.set_facing_right(desired_facing_right)
+
     def _can_swat_cursor(self, cursor_pos: QPoint) -> bool:
         facing_right = self.pet.animation_player.facing_right
 
@@ -138,6 +143,15 @@ class PetCursorAI(QObject):
         )
 
     def _should_hold_swat_without_moving(self, cursor_pos: QPoint) -> bool:
+        pet_left = self.pet.x() - self.ctx.swat_reach_x
+        pet_right = self.pet.x() + self.pet.width() + self.ctx.swat_reach_x
+
+        return (
+            pet_left <= cursor_pos.x() <= pet_right
+            and self._cursor_is_reachable_in_y(cursor_pos)
+        )
+
+    def _should_hold_chase_without_moving(self, cursor_pos: QPoint) -> bool:
         pet_left = self.pet.x() - self.ctx.swat_reach_x
         pet_right = self.pet.x() + self.pet.width() + self.ctx.swat_reach_x
 
@@ -218,9 +232,7 @@ class PetCursorAI(QObject):
 
         if self.ctx.is_swatting_cursor:
             if self._should_hold_swat_without_moving(cursor_pos):
-                desired_facing_right = cursor_pos.x() >= self.pet.x() + self.pet.width() // 2
-                if self.pet.animation_player.facing_right != desired_facing_right:
-                    self.pet.set_facing_right(desired_facing_right)
+                self._face_cursor(cursor_pos)
 
                 if self.pet.current_state != PetState.SWAT:
                     self.pet.set_state(PetState.SWAT)
@@ -242,6 +254,16 @@ class PetCursorAI(QObject):
             if not self._cursor_is_reachable_in_y(cursor_pos):
                 self._reset_swat_encounter()
                 self.finish_cursor_chase()
+                return
+
+            if self._should_hold_chase_without_moving(cursor_pos):
+                self._face_cursor(cursor_pos)
+
+                if self._can_swat_cursor(cursor_pos) and self._cursor_is_stationary_enough():
+                    if self.ctx.swat_count_in_encounter < self.ctx.max_swats_per_encounter:
+                        self.start_cursor_swat()
+                    else:
+                        self.finish_cursor_chase()
                 return
 
             if self._can_swat_cursor(cursor_pos) and self._cursor_is_stationary_enough():
@@ -282,6 +304,12 @@ class PetCursorAI(QObject):
             if not self._cursor_is_reachable_in_y(cursor_pos):
                 self._reset_swat_encounter()
                 self.finish_cursor_chase()
+                return True
+
+            if self._should_hold_chase_without_moving(cursor_pos):
+                self._face_cursor(cursor_pos)
+                if self.pet.current_state == PetState.RUN:
+                    self.pet.set_state(PetState.IDLE)
                 return True
 
             current_x = self.pet.x()
