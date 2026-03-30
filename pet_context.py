@@ -1,5 +1,6 @@
-﻿from dataclasses import dataclass
+﻿from dataclasses import dataclass, field
 from typing import Optional
+from random import randint
 
 from PyQt6.QtCore import QPoint
 
@@ -32,7 +33,20 @@ class PetContext:
     cursor_stationary_threshold: int = 8
     cursor_stationary_ticks_required: int = 2
 
+    swat_release_margin_x: int = 18
+    swat_release_margin_y: int = 12
+
+    swat_count_in_encounter: int = 0
+    max_swats_per_encounter: int = 2
+
+    swat_timeout_ms: int = field(default_factory=lambda: randint(3, 10) * 1000)
+
+    cursor_chase_trigger_chance: float = 0.25
+    post_swat_trigger_chance: float = 0.07
+
+    is_post_swat_cautious: bool = False
+    post_swat_caution_ms: int = 5000
+
     last_cursor_pos: Optional[QPoint] = None
     cursor_still_ticks: int = 0
-
     old_pos: Optional[QPoint] = None
