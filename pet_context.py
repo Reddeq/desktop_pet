@@ -48,14 +48,7 @@ class PetContext:
     is_post_swat_cautious: bool = False
     post_swat_caution_ms: int = 5000
 
-    sleep_pressure_ticks: int = 0
-    sleep_base_chance: float = 0.003
-    sleep_step_chance: float = 0.008
-    sleep_max_chance: float = 0.35
-    swat_sleep_boost_ticks: int = 8
-
-    sleep_duration_min_ms: int = 60_000
-    sleep_duration_max_ms: int = 120_000
+    sleep_energy_threshold: float = 20.0
 
     last_cursor_pos: Optional[QPoint] = None
     cursor_still_ticks: int = 0

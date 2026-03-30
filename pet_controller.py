@@ -6,6 +6,7 @@ from pet_behavior import PetBehavior
 from pet_context import PetContext
 from pet_cursor_ai import PetCursorAI
 from pet_motion import PetMotion
+from pet_needs import PetNeeds
 from pet_state import PetState
 
 
@@ -32,10 +33,6 @@ class PetController(QObject):
         self.dig_timer.setSingleShot(True)
         self.dig_timer.timeout.connect(self.finish_notification_investigation)
 
-        self.sleep_timer = QTimer(self)
-        self.sleep_timer.setSingleShot(True)
-        self.sleep_timer.timeout.connect(self.finish_sleep)
-
         self.motion = PetMotion(
             controller=self,
             pet=self.pet,
@@ -58,11 +55,17 @@ class PetController(QObject):
             parent=self,
         )
 
+        self.needs = PetNeeds(parent=self)
+        self.needs_timer = QTimer(self)
+        self.needs_timer.timeout.connect(self._on_needs_tick)
+
+
     def start(self):
         self.logic_timer.start(5000)
         self.gravity_timer.start(20)
         self.walk_timer.start(16)
         self.cursor_ai.start()
+        self.needs_timer.start(1000)
 
     def stop(self):
         self.logic_timer.stop()
@@ -70,11 +73,17 @@ class PetController(QObject):
         self.walk_timer.stop()
         self.cleaning_timer.stop()
         self.dig_timer.stop()
-        self.sleep_timer.stop()
         self.cursor_ai.stop()
+        self.needs_timer.stop()
 
     def _on_logic_tick(self):
         self.behavior.tick()
+
+    def _on_needs_tick(self):
+        self.needs.tick(self.pet.current_state)
+
+        if self.ctx.is_sleeping and self.needs.values.energy >= 100.0:
+            self.finish_sleep()
 
     def on_animation_finished(self, animation_name: str):
         try:
@@ -100,7 +109,6 @@ class PetController(QObject):
 
     def _stop_sleeping(self):
         self.ctx.is_sleeping = False
-        self.sleep_timer.stop()
 
     def _reset_motion_flags(self):
         self.ctx.is_falling = False
@@ -112,8 +120,11 @@ class PetController(QObject):
         self._stop_sleeping()
         self.cursor_ai.cancel()
 
-    def boost_sleep_pressure(self, amount: int):
-        self.ctx.sleep_pressure_ticks += amount
+    def feed(self):
+        self.needs.feed()
+
+    def use_toilet(self):
+        self.needs.use_toilet()
 
     def start_sleep(self):
         self._reset_motion_flags()
@@ -122,17 +133,9 @@ class PetController(QObject):
 
         if not self.pet.animation_player.has_frames():
             self.finish_sleep()
-            return
-
-        duration_ms = random.randint(
-            self.ctx.sleep_duration_min_ms,
-            self.ctx.sleep_duration_max_ms,
-        )
-        self.sleep_timer.start(duration_ms)
 
     def finish_sleep(self):
         self.ctx.is_sleeping = False
-        self.ctx.sleep_pressure_ticks = 0
         self.pet.set_state(PetState.IDLE)
 
     def start_notification_investigation(self):

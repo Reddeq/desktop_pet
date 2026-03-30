@@ -268,6 +268,10 @@ class FrameAnimatedPet(QWidget):
         )
         menu.addAction(simulate_notice_action)
 
+        show_needs_action = QAction("Показать потребности", self)
+        show_needs_action.triggered.connect(self.debug_print_needs)
+        menu.addAction(show_needs_action)
+
         menu.addSeparator()
 
         exit_action = QAction("Убрать манула", self)
@@ -276,6 +280,16 @@ class FrameAnimatedPet(QWidget):
 
         menu.exec(event.globalPos())
 
+    def debug_print_needs(self):
+        needs = self.controller.needs.snapshot()
+
+        print("=== Потребности манула ===")
+        print(f"Состояние: {self.current_state}")
+        print(f"Сытость   (satiety): {needs['satiety']:.2f}")
+        print(f"Бодрость  (energy):  {needs['energy']:.2f}")
+        print(f"Настроение(mood):    {needs['mood']:.2f}")
+        print(f"Туалет    (bladder): {needs['bladder']:.2f}")
+        print("==========================")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

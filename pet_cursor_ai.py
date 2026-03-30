@@ -188,7 +188,7 @@ class PetCursorAI(QObject):
         self.chase_timer.stop()
 
         self.ctx.swat_count_in_encounter += 1
-        self.controller.boost_sleep_pressure(self.ctx.swat_sleep_boost_ticks)
+        self.controller.needs.apply_swat_cost()
 
         cursor_pos = QCursor.pos()
         self.pet.set_facing_right(cursor_pos.x() >= self.pet.x() + self.pet.width() // 2)
