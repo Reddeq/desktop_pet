@@ -11,3 +11,4 @@ class PetState(str, Enum):
     RUN = "run"
     DIG = "dig"
     SWAT = "swat"
+    SLEEP = "sleep"

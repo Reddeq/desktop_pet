@@ -32,6 +32,10 @@ class PetController(QObject):
         self.dig_timer.setSingleShot(True)
         self.dig_timer.timeout.connect(self.finish_notification_investigation)
 
+        self.sleep_timer = QTimer(self)
+        self.sleep_timer.setSingleShot(True)
+        self.sleep_timer.timeout.connect(self.finish_sleep)
+
         self.motion = PetMotion(
             controller=self,
             pet=self.pet,
@@ -66,6 +70,7 @@ class PetController(QObject):
         self.walk_timer.stop()
         self.cleaning_timer.stop()
         self.dig_timer.stop()
+        self.sleep_timer.stop()
         self.cursor_ai.stop()
 
     def _on_logic_tick(self):
@@ -93,6 +98,10 @@ class PetController(QObject):
         self.ctx.is_investigating_notifications = False
         self.dig_timer.stop()
 
+    def _stop_sleeping(self):
+        self.ctx.is_sleeping = False
+        self.sleep_timer.stop()
+
     def _reset_motion_flags(self):
         self.ctx.is_falling = False
         self.ctx.gravity_speed = 0
@@ -100,7 +109,31 @@ class PetController(QObject):
         self.ctx.is_recovering = False
         self._stop_cleaning()
         self._stop_notification_investigation()
+        self._stop_sleeping()
         self.cursor_ai.cancel()
+
+    def boost_sleep_pressure(self, amount: int):
+        self.ctx.sleep_pressure_ticks += amount
+
+    def start_sleep(self):
+        self._reset_motion_flags()
+        self.ctx.is_sleeping = True
+        self.pet.set_state(PetState.SLEEP)
+
+        if not self.pet.animation_player.has_frames():
+            self.finish_sleep()
+            return
+
+        duration_ms = random.randint(
+            self.ctx.sleep_duration_min_ms,
+            self.ctx.sleep_duration_max_ms,
+        )
+        self.sleep_timer.start(duration_ms)
+
+    def finish_sleep(self):
+        self.ctx.is_sleeping = False
+        self.ctx.sleep_pressure_ticks = 0
+        self.pet.set_state(PetState.IDLE)
 
     def start_notification_investigation(self):
         self._reset_motion_flags()

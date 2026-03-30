@@ -20,13 +20,29 @@ class PetBehavior(QObject):
             or self.ctx.is_dragging
             or self.ctx.is_recovering
             or self.ctx.is_cleaning
+            or self.ctx.is_sleeping
             or self.ctx.is_investigating_notifications
             or self.ctx.is_chasing_cursor
             or self.ctx.is_swatting_cursor
         )
 
+    def _current_sleep_chance(self) -> float:
+        return min(
+            self.ctx.sleep_base_chance + self.ctx.sleep_pressure_ticks * self.ctx.sleep_step_chance,
+            self.ctx.sleep_max_chance,
+        )
+
     def tick(self):
+        if self.ctx.is_sleeping:
+            return
+
+        self.ctx.sleep_pressure_ticks += 1
+
         if self.is_busy():
+            return
+
+        if random.random() < self._current_sleep_chance():
+            self.controller.start_sleep()
             return
 
         actions = ["idle", "walk", "cleaning", "investigate_notifications"]

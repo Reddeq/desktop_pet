@@ -188,6 +188,7 @@ class PetCursorAI(QObject):
         self.chase_timer.stop()
 
         self.ctx.swat_count_in_encounter += 1
+        self.controller.boost_sleep_pressure(self.ctx.swat_sleep_boost_ticks)
 
         cursor_pos = QCursor.pos()
         self.pet.set_facing_right(cursor_pos.x() >= self.pet.x() + self.pet.width() // 2)
@@ -259,6 +260,7 @@ class PetCursorAI(QObject):
             or self.ctx.is_dragging
             or self.ctx.is_recovering
             or self.ctx.is_cleaning
+            or self.ctx.is_sleeping
             or self.ctx.is_investigating_notifications
             or self.ctx.cursor_chase_cooldown
         ):
