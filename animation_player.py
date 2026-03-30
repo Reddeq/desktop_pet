@@ -37,6 +37,9 @@ class AnimationPlayer(QObject):
             "dig": True,
             "swat": True,
             "sleep": True,
+            "sleep_enter": False,
+            "sleep_loop": True,
+            "sleep_exit": False,
         }
 
         self._finished_emitted = False
@@ -132,6 +135,9 @@ class AnimationPlayer(QObject):
                 "dig",
                 "swat",
                 "sleep",
+                "sleep_enter",
+                "sleep_loop",
+                "sleep_exit",
             } and not self.facing_right:
                 pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),

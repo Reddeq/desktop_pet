@@ -7,9 +7,10 @@ from PyQt6.QtCore import Qt, QEvent
 
 from updater import check_for_updates
 from animation_player import AnimationPlayer
+from interaction_mode import InteractionMode
+from pet_animator import PetAnimator
 from pet_controller import PetController
 from pet_state import PetState
-from interaction_mode import InteractionMode
 
 
 def get_resource_base_dir():
@@ -63,6 +64,12 @@ class FrameAnimatedPet(QWidget):
         self.animation_player.frame_changed.connect(self.on_frame_changed)
         self.animation_player.animation_finished.connect(self.on_animation_finished)
 
+        self.animator = PetAnimator(
+            pet=self,
+            animation_player=self.animation_player,
+            parent=self,
+        )
+
         self.controller = PetController(self, self)
         self.controller.start()
 
@@ -91,6 +98,8 @@ class FrameAnimatedPet(QWidget):
             self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
 
     def on_animation_finished(self, animation_name: str):
+        self.animator.on_animation_finished(animation_name)
+
         self.controller.on_animation_finished(animation_name)
 
     def init_position(self):
@@ -125,10 +134,21 @@ class FrameAnimatedPet(QWidget):
     def set_state(self, new_state: PetState, force=False):
         if force or self.current_state != new_state:
             self.current_state = new_state
-            self.animation_player.set_animation(new_state.value, force=force)
+            self.animator.request_state(new_state, force=force)
 
     def set_facing_right(self, value: bool):
         self.animation_player.set_facing_right(value)
+
+    def debug_print_needs(self):
+        needs = self.controller.needs.snapshot()
+
+        print("=== Потребности манула ===")
+        print(f"Состояние: {self.current_state}")
+        print(f"Сытость   (satiety): {needs['satiety']:.2f}")
+        print(f"Бодрость  (energy):  {needs['energy']:.2f}")
+        print(f"Настроение(mood):    {needs['mood']:.2f}")
+        print(f"Туалет    (bladder): {needs['bladder']:.2f}")
+        print("==========================")
 
     def cycle_interaction_mode(self, direction: int):
         modes = [
@@ -280,16 +300,6 @@ class FrameAnimatedPet(QWidget):
 
         menu.exec(event.globalPos())
 
-    def debug_print_needs(self):
-        needs = self.controller.needs.snapshot()
-
-        print("=== Потребности манула ===")
-        print(f"Состояние: {self.current_state}")
-        print(f"Сытость   (satiety): {needs['satiety']:.2f}")
-        print(f"Бодрость  (energy):  {needs['energy']:.2f}")
-        print(f"Настроение(mood):    {needs['mood']:.2f}")
-        print(f"Туалет    (bladder): {needs['bladder']:.2f}")
-        print("==========================")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

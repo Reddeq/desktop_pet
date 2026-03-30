@@ -33,6 +33,9 @@ class PetController(QObject):
         self.dig_timer.setSingleShot(True)
         self.dig_timer.timeout.connect(self.finish_notification_investigation)
 
+        self.needs_timer = QTimer(self)
+        self.needs_timer.timeout.connect(self._on_needs_tick)
+
         self.motion = PetMotion(
             controller=self,
             pet=self.pet,
@@ -56,16 +59,13 @@ class PetController(QObject):
         )
 
         self.needs = PetNeeds(parent=self)
-        self.needs_timer = QTimer(self)
-        self.needs_timer.timeout.connect(self._on_needs_tick)
-
 
     def start(self):
         self.logic_timer.start(5000)
         self.gravity_timer.start(20)
         self.walk_timer.start(16)
-        self.cursor_ai.start()
         self.needs_timer.start(1000)
+        self.cursor_ai.start()
 
     def stop(self):
         self.logic_timer.stop()
@@ -73,8 +73,8 @@ class PetController(QObject):
         self.walk_timer.stop()
         self.cleaning_timer.stop()
         self.dig_timer.stop()
-        self.cursor_ai.stop()
         self.needs_timer.stop()
+        self.cursor_ai.stop()
 
     def _on_logic_tick(self):
         self.behavior.tick()
@@ -130,9 +130,6 @@ class PetController(QObject):
         self._reset_motion_flags()
         self.ctx.is_sleeping = True
         self.pet.set_state(PetState.SLEEP)
-
-        if not self.pet.animation_player.has_frames():
-            self.finish_sleep()
 
     def finish_sleep(self):
         self.ctx.is_sleeping = False
