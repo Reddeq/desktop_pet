@@ -30,7 +30,6 @@ class AnimationPlayer(QObject):
         self.frames = []
         self.facing_right = True
 
-        # True = крутится по кругу, False = проигрывается один раз
         self.loop_map = {
             "idle": True,
             "walk": True,
@@ -40,6 +39,7 @@ class AnimationPlayer(QObject):
             "alert": False,
             "run": True,
             "dig": True,
+            "swat": True,
         }
 
         self._finished_emitted = False
@@ -85,7 +85,6 @@ class AnimationPlayer(QObject):
         if not self.frames:
             return
 
-        # Один кадр
         if len(self.frames) == 1:
             self.frame_changed.emit(self.frames[0])
 
@@ -94,13 +93,11 @@ class AnimationPlayer(QObject):
                 self.animation_finished.emit(self.current_animation)
             return
 
-        # Циклические анимации
         if self._is_looping(self.current_animation):
             self.current_frame_index = (self.current_frame_index + 1) % len(self.frames)
             self.frame_changed.emit(self.frames[self.current_frame_index])
             return
 
-        # Одноразовые анимации
         if self.current_frame_index < len(self.frames) - 1:
             self.current_frame_index += 1
             self.frame_changed.emit(self.frames[self.current_frame_index])
@@ -127,7 +124,6 @@ class AnimationPlayer(QObject):
             if pixmap.isNull():
                 continue
 
-            # Состояния, зависящие от направления
             if animation_name in {
                 "idle",
                 "walk",
@@ -137,6 +133,7 @@ class AnimationPlayer(QObject):
                 "alert",
                 "run",
                 "dig",
+                "swat"
             } and not self.facing_right:
                 pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),
@@ -152,10 +149,8 @@ class AnimationPlayer(QObject):
             canvas.fill(Qt.GlobalColor.transparent)
 
             painter = QPainter(canvas)
-
             x = (self.canvas_width - scaled_pixmap.width()) // 2
             y = self.canvas_height - scaled_pixmap.height()
-
             painter.drawPixmap(x, y, scaled_pixmap)
             painter.end()
 
