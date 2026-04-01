@@ -33,6 +33,12 @@ class PetCursorAI(QObject):
         self.post_swat_caution_timer.setSingleShot(True)
         self.post_swat_caution_timer.timeout.connect(self.finish_post_swat_caution)
 
+        self.cursor_resist_timer = QTimer(self)
+        self.cursor_resist_timer.timeout.connect(self.apply_swat_cursor_resistance)
+
+        self._cursor_resist_velocity_x = 0.0
+        self._cursor_resist_velocity_y = 0.0
+
     # -------------------------
     # Lifecycle
     # -------------------------
@@ -46,6 +52,7 @@ class PetCursorAI(QObject):
         self.cursor_chase_cooldown_timer.stop()
         self.swat_timer.stop()
         self.post_swat_caution_timer.stop()
+        self.cursor_resist_timer.stop()
 
     def cancel(self):
         self.ctx.is_chasing_cursor = False
@@ -53,6 +60,10 @@ class PetCursorAI(QObject):
 
         self.chase_timer.stop()
         self.swat_timer.stop()
+        self.cursor_resist_timer.stop()
+
+        self._cursor_resist_velocity_x = 0.0
+        self._cursor_resist_velocity_y = 0.0
 
         self._reset_swat_encounter()
 
@@ -247,9 +258,19 @@ class PetCursorAI(QObject):
 
         self.swat_timer.start(self.ctx.swat_timeout_ms)
 
+        self._cursor_resist_velocity_x = 0.0
+        self._cursor_resist_velocity_y = 0.0
+
+        if self.ctx.swat_cursor_resist_enabled:
+            self.cursor_resist_timer.start(self.ctx.swat_cursor_resist_interval_ms)
+
     def finish_cursor_swat(self, resume_chase=False):
         self.ctx.is_swatting_cursor = False
         self.swat_timer.stop()
+        self.cursor_resist_timer.stop()
+
+        self._cursor_resist_velocity_x = 0.0
+        self._cursor_resist_velocity_y = 0.0
 
         if resume_chase:
             self.start_cursor_chase()
@@ -260,6 +281,81 @@ class PetCursorAI(QObject):
         if self.ctx.is_swatting_cursor:
             self._start_post_swat_caution()
             self.finish_cursor_swat(resume_chase=False)
+
+    def apply_swat_cursor_resistance(self):
+        """
+        Более "игровое" сопротивление курсору:
+        - dead zone около лапы;
+        - пружина тянет обратно;
+        - velocity накапливается и затухает (damping);
+        - сила ограничивается, чтобы не было резких телепортов;
+        - если пользователь дёрнул слишком сильно, курсор временно почти отпускаем.
+        """
+        if not self.ctx.is_swatting_cursor:
+            return
+
+        cursor_pos = QCursor.pos()
+        anchor_x, anchor_y = self._get_swat_resist_anchor()
+
+        dx = float(cursor_pos.x()) - anchor_x
+        dy = float(cursor_pos.y()) - anchor_y
+
+        distance_sq = dx * dx + dy * dy
+        dead_zone = float(self.ctx.swat_cursor_dead_zone_radius)
+        break_distance = float(self.ctx.swat_cursor_break_distance)
+
+        # Если пользователь слишком сильно рванул курсор —
+        # не боремся изо всех сил, чтобы ощущение было естественнее.
+        if distance_sq >= break_distance * break_distance:
+            self._cursor_resist_velocity_x *= 0.5
+            self._cursor_resist_velocity_y *= 0.5
+            return
+
+        # Внутри dead zone ничего не делаем
+        if distance_sq <= dead_zone * dead_zone:
+            self._cursor_resist_velocity_x *= 0.5
+            self._cursor_resist_velocity_y *= 0.5
+            return
+
+        # Пружинная сила: тянет к anchor
+        spring_strength = self.ctx.swat_cursor_spring_strength
+        damping = self.ctx.swat_cursor_damping
+        max_pull = self.ctx.swat_cursor_max_pull_per_tick
+
+        force_x = -dx * spring_strength
+        force_y = -dy * spring_strength
+
+        # Накопление + демпфирование
+        self._cursor_resist_velocity_x = (self._cursor_resist_velocity_x + force_x) * damping
+        self._cursor_resist_velocity_y = (self._cursor_resist_velocity_y + force_y) * damping
+
+        # Ограничиваем максимум сдвига за тик
+        move_x = max(-max_pull, min(max_pull, self._cursor_resist_velocity_x))
+        move_y = max(-max_pull, min(max_pull, self._cursor_resist_velocity_y))
+
+        if abs(move_x) < 0.5 and abs(move_y) < 0.5:
+            return
+
+        new_x = int(cursor_pos.x() + move_x)
+        new_y = int(cursor_pos.y() + move_y)
+
+        if new_x != cursor_pos.x() or new_y != cursor_pos.y():
+            QCursor.setPos(new_x, new_y)
+
+    def _get_swat_resist_anchor(self) -> tuple[float, float]:
+        """
+        Точка, к которой "пружина" пытается слегка вернуть курсор.
+        Берём переднюю часть манула около лапы.
+        """
+        facing_right = self.pet.animation_player.facing_right
+
+        if facing_right:
+            anchor_x = self.pet.x() + self.pet.width() - self.ctx.cursor_front_gap
+        else:
+            anchor_x = self.pet.x() + self.ctx.cursor_front_gap
+
+        anchor_y = self.pet.y() + int(self.pet.height() * 0.70)
+        return float(anchor_x), float(anchor_y)
 
     # -------------------------
     # Periodic AI tick

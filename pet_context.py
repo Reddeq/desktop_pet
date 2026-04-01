@@ -53,3 +53,27 @@ class PetContext:
     last_cursor_pos: Optional[QPoint] = None
     cursor_still_ticks: int = 0
     old_pos: Optional[QPoint] = None
+
+    # -------------------------
+    # Game-like cursor resistance during swat
+    # -------------------------
+    swat_cursor_resist_enabled: bool = True
+
+    # Частота обновления сопротивления
+    swat_cursor_resist_interval_ms: int = 16
+
+    # Радиус мёртвой зоны вокруг лапы — внутри неё курсор не тянем
+    swat_cursor_dead_zone_radius: int = 18
+
+    # "Жёсткость пружины": насколько сильно тянем назад
+    swat_cursor_spring_strength: float = 0.18
+
+    # Демпфирование: чем меньше, тем сильнее вязкость / меньше разлёт
+    swat_cursor_damping: float = 0.72
+
+    # Ограничение максимального сдвига курсора за один тик
+    swat_cursor_max_pull_per_tick: float = 10.0
+
+    # Если пользователь слишком сильно дёрнул курсор —
+    # сопротивление временно ослабевает / отпускает
+    swat_cursor_break_distance: int = 120
