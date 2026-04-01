@@ -21,32 +21,23 @@ class AnimationPlayer(QObject):
         self.assets_path = Path(assets_path)
         self.scale_factor = scale_factor
 
-        self.current_animation = None
+        self.current_animation: str | None = None
         self.current_frame_index = 0
-        self.frames = []
+        self.frames: list[QPixmap] = []
         self.facing_right = True
 
-        self.loop_map = {
-            "idle": True,
-            "walk": True,
-            "falling": True,
-            "falling_recovery": False,
-            "cleaning": True,
-            "alert": False,
-            "run": True,
-            "dig": True,
-            "swat": True,
-            "sleep": True,
-            "sleep_enter": False,
-            "sleep_loop": True,
-            "sleep_exit": False,
-        }
+        # Источник истины по loop приходит извне от PetAnimator
+        self.current_loop = True
 
         self._finished_emitted = False
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._next_frame)
         self.timer.start(frame_interval)
+
+    # -------------------------
+    # Basic controls
+    # -------------------------
 
     def set_frame_interval(self, interval_ms: int):
         self.timer.setInterval(interval_ms)
@@ -61,13 +52,26 @@ class AnimationPlayer(QObject):
         if self.facing_right != value:
             self.facing_right = value
             if self.current_animation is not None:
-                self.set_animation(self.current_animation, force=True)
+                self.set_animation(
+                    self.current_animation,
+                    loop=self.current_loop,
+                    force=True,
+                )
 
-    def set_animation(self, animation_name: str, force: bool = False) -> bool:
-        if not force and self.current_animation == animation_name:
+    # -------------------------
+    # Playback API
+    # -------------------------
+
+    def set_animation(self, animation_name: str, loop: bool, force: bool = False) -> bool:
+        if (
+            not force
+            and self.current_animation == animation_name
+            and self.current_loop == loop
+        ):
             return bool(self.frames)
 
         self.current_animation = animation_name
+        self.current_loop = loop
         self.current_frame_index = 0
         self._finished_emitted = False
         self.frames = self._load_frames(animation_name)
@@ -78,26 +82,30 @@ class AnimationPlayer(QObject):
 
         return False
 
-    def _is_looping(self, animation_name: str) -> bool:
-        return self.loop_map.get(animation_name, True)
+    # -------------------------
+    # Internal frame stepping
+    # -------------------------
 
     def _next_frame(self):
         if not self.frames:
             return
 
+        # Один кадр
         if len(self.frames) == 1:
             self.frame_changed.emit(self.frames[0])
 
-            if not self._is_looping(self.current_animation) and not self._finished_emitted:
+            if not self.current_loop and not self._finished_emitted:
                 self._finished_emitted = True
                 self.animation_finished.emit(self.current_animation)
             return
 
-        if self._is_looping(self.current_animation):
+        # Loop-клип
+        if self.current_loop:
             self.current_frame_index = (self.current_frame_index + 1) % len(self.frames)
             self.frame_changed.emit(self.frames[self.current_frame_index])
             return
 
+        # One-shot клип
         if self.current_frame_index < len(self.frames) - 1:
             self.current_frame_index += 1
             self.frame_changed.emit(self.frames[self.current_frame_index])
@@ -108,8 +116,12 @@ class AnimationPlayer(QObject):
                 self._finished_emitted = True
                 self.animation_finished.emit(self.current_animation)
 
-    def _load_frames(self, animation_name: str) -> list:
-        frames = []
+    # -------------------------
+    # Asset loading
+    # -------------------------
+
+    def _load_frames(self, animation_name: str) -> list[QPixmap]:
+        frames: list[QPixmap] = []
         path = self.assets_path / animation_name
 
         if not path.exists():
@@ -124,21 +136,7 @@ class AnimationPlayer(QObject):
             if pixmap.isNull():
                 continue
 
-            if animation_name in {
-                "idle",
-                "walk",
-                "falling",
-                "falling_recovery",
-                "cleaning",
-                "alert",
-                "run",
-                "dig",
-                "swat",
-                "sleep",
-                "sleep_enter",
-                "sleep_loop",
-                "sleep_exit",
-            } and not self.facing_right:
+            if not self.facing_right:
                 pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),
                     Qt.TransformationMode.SmoothTransformation,

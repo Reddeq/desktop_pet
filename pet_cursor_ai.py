@@ -3,6 +3,7 @@
 from PyQt6.QtCore import QObject, QTimer, QPoint
 from PyQt6.QtGui import QCursor
 
+from animation_node import AnimationNode
 from pet_state import PetState
 
 
@@ -32,6 +33,10 @@ class PetCursorAI(QObject):
         self.post_swat_caution_timer.setSingleShot(True)
         self.post_swat_caution_timer.timeout.connect(self.finish_post_swat_caution)
 
+    # -------------------------
+    # Lifecycle
+    # -------------------------
+
     def start(self):
         self.cursor_check_timer.start(120)
 
@@ -45,9 +50,15 @@ class PetCursorAI(QObject):
     def cancel(self):
         self.ctx.is_chasing_cursor = False
         self.ctx.is_swatting_cursor = False
+
         self.chase_timer.stop()
         self.swat_timer.stop()
+
         self._reset_swat_encounter()
+
+    # -------------------------
+    # Encounter helpers
+    # -------------------------
 
     def _reset_swat_encounter(self):
         self.ctx.swat_count_in_encounter = 0
@@ -64,6 +75,10 @@ class PetCursorAI(QObject):
             return self.ctx.post_swat_trigger_chance
         return self.ctx.cursor_chase_trigger_chance
 
+    # -------------------------
+    # Cursor motion helpers
+    # -------------------------
+
     def _update_cursor_motion_state(self):
         cursor_pos = QCursor.pos()
 
@@ -76,7 +91,10 @@ class PetCursorAI(QObject):
         dy = cursor_pos.y() - self.ctx.last_cursor_pos.y()
         distance_sq = dx * dx + dy * dy
 
-        threshold_sq = self.ctx.cursor_stationary_threshold * self.ctx.cursor_stationary_threshold
+        threshold_sq = (
+            self.ctx.cursor_stationary_threshold
+            * self.ctx.cursor_stationary_threshold
+        )
 
         if distance_sq <= threshold_sq:
             self.ctx.cursor_still_ticks += 1
@@ -138,7 +156,8 @@ class PetCursorAI(QObject):
         max_y = self.pet.y() + self.pet.height() + self.ctx.swat_release_margin_y
 
         return (
-            abs(cursor_pos.x() - front_x) <= (self.ctx.swat_reach_x + self.ctx.swat_release_margin_x)
+            abs(cursor_pos.x() - front_x)
+            <= (self.ctx.swat_reach_x + self.ctx.swat_release_margin_x)
             and min_y <= cursor_pos.y() <= max_y
         )
 
@@ -178,16 +197,27 @@ class PetCursorAI(QObject):
         target_x, _ = self.pet.clamp_position(target_x, self.pet.ground_y)
         return target_x, direction
 
+    # -------------------------
+    # Chase / swat state machine
+    # -------------------------
+
     def start_cursor_chase(self):
         self.controller._reset_motion_flags()
         self.ctx.is_chasing_cursor = True
         self.ctx.is_swatting_cursor = False
 
+        self.controller._set_logical_state(PetState.RUN)
+        self.pet.play_node(
+            AnimationNode.RUNNING,
+            replace=True,
+            force_restart=True,
+        )
+
         self.chase_timer.start(1800)
 
     def finish_cursor_chase(self):
         self.cancel()
-        self.pet.set_state(PetState.IDLE)
+        self.controller.start_idle()
 
         self.ctx.cursor_chase_cooldown = True
         self.cursor_chase_cooldown_timer.start(4000)
@@ -204,14 +234,18 @@ class PetCursorAI(QObject):
         self.ctx.swat_count_in_encounter += 1
         self.controller.needs.apply_swat_cost()
 
+        self.controller._set_logical_state(PetState.SWAT)
+
         cursor_pos = QCursor.pos()
         self.pet.set_facing_right(cursor_pos.x() >= self.pet.x() + self.pet.width() // 2)
-        self.pet.set_state(PetState.SWAT)
+
+        self.pet.play_node(
+            AnimationNode.SWATTING,
+            replace=True,
+            force_restart=True,
+        )
 
         self.swat_timer.start(self.ctx.swat_timeout_ms)
-
-        if not self.pet.animation_player.has_frames():
-            self.finish_cursor_chase()
 
     def finish_cursor_swat(self, resume_chase=False):
         self.ctx.is_swatting_cursor = False
@@ -227,20 +261,33 @@ class PetCursorAI(QObject):
             self._start_post_swat_caution()
             self.finish_cursor_swat(resume_chase=False)
 
+    # -------------------------
+    # Periodic AI tick
+    # -------------------------
+
     def check_cursor_proximity(self):
         cursor_pos = self._update_cursor_motion_state()
 
+        # Уже swatting
         if self.ctx.is_swatting_cursor:
             if self._should_hold_swat_without_moving(cursor_pos):
                 self._face_cursor(cursor_pos)
 
-                if self.pet.current_state != PetState.SWAT:
-                    self.pet.set_state(PetState.SWAT)
+                if self.pet.current_animation_node() != AnimationNode.SWATTING:
+                    self.pet.play_node(
+                        AnimationNode.SWATTING,
+                        replace=True,
+                        force_restart=True,
+                    )
                 return
 
             if self._should_continue_swat(cursor_pos) and self._cursor_is_stationary_enough():
-                if self.pet.current_state != PetState.SWAT:
-                    self.pet.set_state(PetState.SWAT)
+                if self.pet.current_animation_node() != AnimationNode.SWATTING:
+                    self.pet.play_node(
+                        AnimationNode.SWATTING,
+                        replace=True,
+                        force_restart=True,
+                    )
                 return
 
             if self._cursor_is_near_pet(cursor_pos) and self._cursor_is_reachable_in_y(cursor_pos):
@@ -250,6 +297,7 @@ class PetCursorAI(QObject):
                 self.finish_cursor_swat(resume_chase=False)
             return
 
+        # Уже chasing
         if self.ctx.is_chasing_cursor:
             if not self._cursor_is_reachable_in_y(cursor_pos):
                 self._reset_swat_encounter()
@@ -258,6 +306,15 @@ class PetCursorAI(QObject):
 
             if self._should_hold_chase_without_moving(cursor_pos):
                 self._face_cursor(cursor_pos)
+
+                # В контактной зоне не держим frozen RUNNING,
+                # а переводим в standing-like neutral pose
+                if self.pet.current_animation_node() != AnimationNode.STANDING_IDLE:
+                    self.pet.play_node(
+                        AnimationNode.STANDING_IDLE,
+                        replace=True,
+                        force_restart=True,
+                    )
 
                 if self._can_swat_cursor(cursor_pos) and self._cursor_is_stationary_enough():
                     if self.ctx.swat_count_in_encounter < self.ctx.max_swats_per_encounter:
@@ -271,11 +328,13 @@ class PetCursorAI(QObject):
                     self.start_cursor_swat()
                 else:
                     self.finish_cursor_chase()
-            return
+                return
 
+        # Встреча закончилась
         if not self._cursor_is_near_pet(cursor_pos):
             self._reset_swat_encounter()
 
+        # Если заняты другими сценариями — не стартуем chase
         if (
             self.ctx.is_falling
             or self.ctx.is_walking
@@ -290,9 +349,12 @@ class PetCursorAI(QObject):
 
         if self._cursor_is_near_pet(cursor_pos) and self._cursor_is_reachable_in_y(cursor_pos):
             trigger_chance = self._current_chase_trigger_chance()
-
             if random.random() < trigger_chance:
                 self.start_cursor_chase()
+
+    # -------------------------
+    # Movement hook
+    # -------------------------
 
     def process_chase_step(self) -> bool:
         if self.ctx.is_swatting_cursor:
@@ -308,16 +370,26 @@ class PetCursorAI(QObject):
 
             if self._should_hold_chase_without_moving(cursor_pos):
                 self._face_cursor(cursor_pos)
-                if self.pet.current_state == PetState.RUN:
-                    self.pet.set_state(PetState.IDLE)
+
+                if self.pet.current_animation_node() != AnimationNode.STANDING_IDLE:
+                    self.pet.play_node(
+                        AnimationNode.STANDING_IDLE,
+                        replace=True,
+                        force_restart=True,
+                    )
                 return True
 
             current_x = self.pet.x()
-
             target_x, direction = self._get_cursor_chase_target_x(cursor_pos)
 
             self.pet.set_facing_right(direction == 1)
-            self.pet.set_state(PetState.RUN)
+
+            if self.pet.current_animation_node() != AnimationNode.RUNNING:
+                self.pet.play_node(
+                    AnimationNode.RUNNING,
+                    replace=True,
+                    force_restart=True,
+                )
 
             if target_x == current_x:
                 return True

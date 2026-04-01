@@ -1,7 +1,5 @@
 ﻿from PyQt6.QtCore import QObject
 
-from pet_state import PetState
-
 
 class PetMotion(QObject):
     def __init__(self, controller, pet, ctx, parent=None):
@@ -10,26 +8,47 @@ class PetMotion(QObject):
         self.pet = pet
         self.ctx = ctx
 
+    # -------------------------
+    # Generic horizontal movement
+    # -------------------------
+
     def start_walk(self, direction: int, distance: int):
+        """
+        Запускает обычное перемещение на фиксированную дистанцию.
+
+        ВАЖНО:
+        Этот метод больше не включает анимацию сам.
+        Какой animation-node сейчас активен (например WALKING) —
+        решает PetAnimator / controller / behavior layer.
+        """
         self.ctx.walk_direction = direction
         self.pet.set_facing_right(direction == 1)
-        self.pet.set_state(PetState.WALK)
 
         target_x = self.pet.x() + (direction * distance)
         target_x, _ = self.pet.clamp_position(target_x, self.pet.ground_y)
 
         if target_x == self.pet.x():
-            self.pet.set_state(PetState.IDLE)
+            # Двигаться некуда — сразу сообщаем аниматору,
+            # что motion-step завершён.
+            self.pet.animator.notify_motion_complete()
             return
 
         self.ctx.walk_target_x = target_x
         self.ctx.is_walking = True
 
     def start_run_to_x(self, target_x: int):
+        """
+        Запускает движение к конкретной X-координате.
+
+        ВАЖНО:
+        Этот метод больше не включает RUNNING анимацию сам.
+        RUNNING должен уже быть активирован sequence-логикой через PetAnimator.
+        """
         current_x = self.pet.x()
         target_x, _ = self.pet.clamp_position(target_x, self.pet.ground_y)
 
         if target_x == current_x:
+            self.pet.animator.notify_motion_complete()
             return
 
         direction = 1 if target_x > current_x else -1
@@ -38,7 +57,6 @@ class PetMotion(QObject):
         self.ctx.is_walking = True
 
         self.pet.set_facing_right(direction == 1)
-        self.pet.set_state(PetState.RUN)
 
     def get_tray_target_x(self):
         screen_rect = self.pet.get_current_screen_rect()
@@ -61,11 +79,11 @@ class PetMotion(QObject):
 
         if new_x == self.ctx.walk_target_x:
             self.ctx.is_walking = False
+            self.pet.animator.notify_motion_complete()
 
-            if self.ctx.is_investigating_notifications:
-                self.controller.start_dig()
-            else:
-                self.pet.set_state(PetState.IDLE)
+    # -------------------------
+    # Gravity / landing / interrupt recovery
+    # -------------------------
 
     def _land(self):
         self.ctx.is_falling = False
@@ -90,12 +108,22 @@ class PetMotion(QObject):
             self._land()
 
     def start_fall_recovery(self):
+        """
+        Falling в новой архитектуре — это interrupt.
+        После приземления мы не ставим анимацию вручную,
+        а просим аниматор завершить interrupt через recovery sequence:
+            FALLING -> FALLING_RECOVERY -> STANDING_IDLE
+        """
         self.ctx.is_recovering = True
-        self.pet.set_state(PetState.FALLING_RECOVERY)
 
-        if not self.pet.animation_player.has_frames():
-            self.finish_fall_recovery()
+        if hasattr(self.pet, "resolve_animation_interrupt"):
+            self.pet.resolve_animation_interrupt()
+        else:
+            self.pet.animator.resolve_interrupt()
 
     def finish_fall_recovery(self):
+        """
+        Здесь больше не переключаем анимацию вручную.
+        К этому моменту PetAnimator уже должен был пройти recovery sequence.
+        """
         self.ctx.is_recovering = False
-        self.pet.set_state(PetState.IDLE)

@@ -2,6 +2,7 @@
 
 from PyQt6.QtCore import QObject, QTimer, QPoint
 
+from animation_node import AnimationNode
 from pet_behavior import PetBehavior
 from pet_context import PetContext
 from pet_cursor_ai import PetCursorAI
@@ -60,6 +61,17 @@ class PetController(QObject):
 
         self.needs = PetNeeds(parent=self)
 
+        # -------------------------
+        # Notification / digging runtime state
+        # -------------------------
+        self.notification_target_x: int | None = None
+        self.notification_motion_started = False
+        self.notification_dig_started = False
+
+    # -------------------------
+    # Lifecycle
+    # -------------------------
+
     def start(self):
         self.logic_timer.start(5000)
         self.gravity_timer.start(20)
@@ -76,28 +88,57 @@ class PetController(QObject):
         self.needs_timer.stop()
         self.cursor_ai.stop()
 
+    # -------------------------
+    # High-level logical state
+    # -------------------------
+
+    def _set_logical_state(self, state: PetState):
+        """
+        High-level logical state for needs / debug / behavior.
+        Больше НЕ используется как API анимаций.
+        """
+        self.pet.current_state = state
+
+    # -------------------------
+    # Periodic ticks
+    # -------------------------
+
     def _on_logic_tick(self):
         self.behavior.tick()
 
     def _on_needs_tick(self):
-        self.needs.tick(self.pet.current_state)
+        self.needs.tick(
+            logical_state=self.pet.current_state,
+            current_animation_node=self.pet.current_animation_node(),
+        )
 
         if self.ctx.is_sleeping and self.needs.values.energy >= 100.0:
             self.finish_sleep()
 
+    # -------------------------
+    # Animation finished hook
+    # -------------------------
+
     def on_animation_finished(self, animation_name: str):
+        """
+        Controller не управляет обычными переходами анимаций вручную —
+        это делает PetAnimator.
+
+        Здесь остаются только side-effects сценариев/логики.
+        """
         try:
-            state = PetState(animation_name)
+            finished_node = AnimationNode(animation_name)
         except ValueError:
             return
 
-        if state == PetState.FALLING_RECOVERY and self.ctx.is_recovering:
+        # После завершения falling_recovery one-shot
+        # логически завершаем recovery state
+        if finished_node == AnimationNode.FALLING_RECOVERY and self.ctx.is_recovering:
             self.motion.finish_fall_recovery()
-            return
 
-        if state == PetState.ALERT and self.ctx.is_investigating_notifications:
-            self.go_to_notification_area()
-            return
+    # -------------------------
+    # Internal state cleanup
+    # -------------------------
 
     def _stop_cleaning(self):
         self.ctx.is_cleaning = False
@@ -107,6 +148,10 @@ class PetController(QObject):
         self.ctx.is_investigating_notifications = False
         self.dig_timer.stop()
 
+        self.notification_target_x = None
+        self.notification_motion_started = False
+        self.notification_dig_started = False
+
     def _stop_sleeping(self):
         self.ctx.is_sleeping = False
 
@@ -115,10 +160,16 @@ class PetController(QObject):
         self.ctx.gravity_speed = 0
         self.ctx.is_walking = False
         self.ctx.is_recovering = False
+
         self._stop_cleaning()
         self._stop_notification_investigation()
         self._stop_sleeping()
+
         self.cursor_ai.cancel()
+
+    # -------------------------
+    # External needs actions
+    # -------------------------
 
     def feed(self):
         self.needs.feed()
@@ -126,77 +177,163 @@ class PetController(QObject):
     def use_toilet(self):
         self.needs.use_toilet()
 
+    # -------------------------
+    # Idle
+    # -------------------------
+
+    def start_idle(self):
+        self._set_logical_state(PetState.IDLE)
+        self.pet.play_node(
+            AnimationNode.SITTING_IDLE,
+            replace=True,
+            force_restart=True,
+        )
+
+    # -------------------------
+    # Sleep
+    # -------------------------
+
     def start_sleep(self):
         self._reset_motion_flags()
         self.ctx.is_sleeping = True
-        self.pet.set_state(PetState.SLEEP)
+        self._set_logical_state(PetState.SLEEP)
+
+        # Граф сам подставит переходы до SLEEPING
+        self.pet.play_node(
+            AnimationNode.SLEEPING,
+            replace=True,
+            force_restart=True,
+        )
 
     def finish_sleep(self):
         self.ctx.is_sleeping = False
-        self.pet.set_state(PetState.IDLE)
+        self.start_idle()
 
-    def start_notification_investigation(self):
-        self._reset_motion_flags()
-        self.ctx.is_investigating_notifications = True
-        self.pet.set_state(PetState.ALERT)
-
-        if not self.pet.animation_player.has_frames():
-            self.go_to_notification_area()
-
-    def go_to_notification_area(self):
-        tray_x = self.motion.get_tray_target_x()
-        current_x = self.pet.x()
-
-        if tray_x == current_x:
-            self.start_dig()
-            return
-
-        self.motion.start_run_to_x(tray_x)
-
-    def start_dig(self):
-        self.pet.set_state(PetState.DIG)
-
-        if not self.pet.animation_player.has_frames():
-            self.finish_notification_investigation()
-            return
-
-        duration_ms = random.randint(2000, 4000)
-        self.dig_timer.start(duration_ms)
-
-    def finish_notification_investigation(self):
-        self._stop_notification_investigation()
-        self.pet.set_state(PetState.IDLE)
+    # -------------------------
+    # Cleaning
+    # -------------------------
 
     def start_cleaning(self):
+        self._reset_motion_flags()
         self.ctx.is_cleaning = True
-        self.pet.set_state(PetState.CLEANING)
+        self._set_logical_state(PetState.CLEANING)
 
-        if not self.pet.animation_player.has_frames():
-            self.finish_cleaning()
-            return
+        self.pet.play_node(
+            AnimationNode.CLEANING,
+            replace=True,
+            force_restart=True,
+        )
 
         duration_ms = random.randint(2000, 5000)
         self.cleaning_timer.start(duration_ms)
 
     def finish_cleaning(self):
         self.ctx.is_cleaning = False
-        self.pet.set_state(PetState.IDLE)
+        self.start_idle()
+
+    # -------------------------
+    # Notification / digging scenario
+    # -------------------------
+
+    def start_notification_investigation(self):
+        """
+        Sequence-driven сценарий:
+            ALERT -> RUNNING -> DIGGING
+
+        Промежуточные переходы добавляет PetAnimator по animation graph.
+        """
+        self._reset_motion_flags()
+        self.ctx.is_investigating_notifications = True
+        self._set_logical_state(PetState.ALERT)
+
+        self.notification_target_x = self.motion.get_tray_target_x()
+        self.notification_motion_started = False
+        self.notification_dig_started = False
+
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.ALERT,
+                AnimationNode.RUNNING,
+                AnimationNode.DIGGING,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+
+    def _sync_notification_sequence(self):
+        if not self.ctx.is_investigating_notifications:
+            return
+
+        current_node = self.pet.current_animation_node()
+
+        # Когда sequence реально дошла до RUNNING — запускаем физическое движение
+        if (
+            current_node == AnimationNode.RUNNING
+            and not self.notification_motion_started
+            and self.notification_target_x is not None
+        ):
+            self.notification_motion_started = True
+            self._set_logical_state(PetState.RUN)
+            self.motion.start_run_to_x(self.notification_target_x)
+            return
+
+        # Когда sequence реально дошла до DIGGING — запускаем digging phase
+        if (
+            current_node == AnimationNode.DIGGING
+            and not self.notification_dig_started
+        ):
+            self.notification_dig_started = True
+            self._set_logical_state(PetState.DIG)
+
+            duration_ms = random.randint(2000, 4000)
+            self.dig_timer.start(duration_ms)
+            return
+
+    def finish_notification_investigation(self):
+        self._stop_notification_investigation()
+        self.start_idle()
+
+    # -------------------------
+    # Movement processing
+    # -------------------------
 
     def process_walk_step(self):
+        # Cursor AI может полностью перехватить движение
         if self.cursor_ai.process_chase_step():
             return
 
+        # Синхронизация notification-sequence с motion/dig
+        self._sync_notification_sequence()
+
+        # Физическое движение
         self.motion.process_walk_step()
+
+    # -------------------------
+    # Gravity / falling recovery
+    # -------------------------
 
     def apply_gravity(self):
         self.motion.apply_gravity()
 
+    # -------------------------
+    # Mouse drag / falling interrupt
+    # -------------------------
+
     def on_mouse_press(self, global_pos):
         self._reset_motion_flags()
         self.ctx.is_dragging = True
-
         self.ctx.old_pos = global_pos.toPoint()
-        self.pet.set_state(PetState.FALLING)
+
+        self._set_logical_state(PetState.FALLING)
+
+        # Falling — только interrupt
+        self.pet.interrupt_animation(
+            AnimationNode.FALLING,
+            recovery_targets=[
+                AnimationNode.FALLING_RECOVERY,
+                AnimationNode.STANDING_IDLE,
+            ],
+        )
 
     def on_mouse_move(self, global_pos):
         if self.ctx.old_pos is None:
@@ -210,9 +347,6 @@ class PetController(QObject):
 
         new_x, new_y = self.pet.clamp_position(new_x, new_y)
 
-        if self.pet.current_state != PetState.FALLING:
-            self.pet.set_state(PetState.FALLING)
-
         self.pet.move(new_x, new_y)
         self.ctx.old_pos = global_pos.toPoint()
 
@@ -223,6 +357,8 @@ class PetController(QObject):
         if self.pet.y() < self.pet.ground_y:
             self.ctx.is_falling = True
             self.ctx.gravity_speed = 0
-            self.pet.set_state(PetState.FALLING)
+            self._set_logical_state(PetState.FALLING)
         else:
-            self.pet.set_state(PetState.IDLE)
+            # Если отпустили сразу на земле — завершаем interrupt без физического падения
+            self.ctx.is_recovering = True
+            self.pet.resolve_animation_interrupt()

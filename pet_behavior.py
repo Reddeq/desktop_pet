@@ -2,6 +2,7 @@
 
 from PyQt6.QtCore import QObject
 
+from animation_node import AnimationNode
 from pet_state import PetState
 
 
@@ -12,6 +13,10 @@ class PetBehavior(QObject):
         self.pet = pet
         self.ctx = ctx
         self.motion = motion
+
+    # -------------------------
+    # Busy / gate checks
+    # -------------------------
 
     def is_busy(self) -> bool:
         return (
@@ -26,25 +31,73 @@ class PetBehavior(QObject):
             or self.ctx.is_swatting_cursor
         )
 
+    # -------------------------
+    # Autonomous scenarios
+    # -------------------------
+
+    def start_walk_scenario(self):
+        """
+        Случайное блуждание:
+        - animation sequence: WALKING -> SITTING_IDLE
+        - физическое движение: через PetMotion
+
+        ВАЖНО:
+        WALKING здесь НЕ финальный target, чтобы после
+        notify_motion_complete() аниматор мог перейти дальше
+        к SITTING_IDLE.
+        """
+        direction = random.choice([-1, 1])
+        distance = random.randint(60, 180)
+
+        self.controller._set_logical_state(PetState.WALK)
+
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.WALKING,
+                AnimationNode.SITTING_IDLE,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+
+        self.motion.start_walk(direction, distance)
+
+    def start_idle_scenario(self):
+        """
+        Возврат в обычную сидячую idle-позу.
+        """
+        self.controller.start_idle()
+
+    # -------------------------
+    # Main tick
+    # -------------------------
+
     def tick(self):
+        # Во сне не запускаем ничего нового
         if self.ctx.is_sleeping:
             return
 
+        # Если заняты текущим сценарием — тоже ничего нового
         if self.is_busy():
             return
 
+        # Сон инициируется по needs / energy
         if self.controller.needs.is_sleepy(self.ctx.sleep_energy_threshold):
             self.controller.start_sleep()
             return
 
-        actions = ["idle", "walk", "cleaning", "investigate_notifications"]
+        actions = [
+            "idle",
+            "walk",
+            "cleaning",
+            "investigate_notifications",
+        ]
         weights = [0.45, 0.25, 0.20, 0.10]
+
         new_action = random.choices(actions, weights=weights)[0]
 
         if new_action == "walk":
-            direction = random.choice([-1, 1])
-            distance = random.randint(60, 180)
-            self.motion.start_walk(direction, distance)
+            self.start_walk_scenario()
 
         elif new_action == "cleaning":
             self.controller.start_cleaning()
@@ -53,4 +106,4 @@ class PetBehavior(QObject):
             self.controller.start_notification_investigation()
 
         else:
-            self.pet.set_state(PetState.IDLE)
+            self.start_idle_scenario()

@@ -1,0 +1,27 @@
+﻿from enum import Enum
+
+
+class AnimationNode(str, Enum):
+    SITTING_IDLE = "sitting_idle"
+    WALKING = "walking"
+    SITTING_DOWN = "sitting_down"
+    STANDING_UP = "standing_up"
+    RUNNING = "running"
+    ALERT = "alert"
+    DIGGING = "digging"
+    CLEANING = "cleaning"
+    STANDING_IDLE = "standing_idle"
+    SWATTING = "swatting"
+    LAYING_DOWN = "laying_down"
+    SLEEPING = "sleeping"
+    SITTING_UP = "sitting_up"
+    YAWNING = "yawning"
+    MEOWING = "meowing"
+    SCRATCHING_SCREEN = "scratching_screen"
+    EATING = "eating"
+    POOPING = "pooping"
+    STARTLED = "startled"
+    HUNTING = "hunting"
+    HIDING = "hiding"
+    FALLING = "falling"
+    FALLING_RECOVERY = "falling_recovery"

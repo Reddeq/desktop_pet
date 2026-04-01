@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QApplication, QWidget, QLabel
 from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtCore import Qt, QEvent
 
+from animation_node import AnimationNode
 from animation_player import AnimationPlayer
 from interaction_cursors import InteractionCursorManager
 from interaction_mode import InteractionMode
@@ -25,7 +26,11 @@ class FrameAnimatedPet(QWidget):
         super().__init__()
 
         self.scale_factor = 0.3
-        self.current_state = None
+
+        # Пока оставляем current_state как high-level logical state,
+        # потому что controller / needs ещё используют его.
+        self.current_state: PetState | None = None
+
         self._position_initialized = False
 
         self.setWindowFlags(
@@ -63,16 +68,89 @@ class FrameAnimatedPet(QWidget):
             parent=self,
         )
 
+        # Стартовый animation node — уже по новой системе
+        self.animator.set_initial_node(AnimationNode.SITTING_IDLE)
+
         self.controller = PetController(self, self)
         self.controller.start()
 
-        self.set_state(PetState.IDLE, force=True)
+        # Стартовое логическое состояние — пока оставляем для старых модулей
+        self.current_state = PetState.IDLE
 
         self.init_position()
         self._position_initialized = True
 
         self.show()
 
+    # -------------------------
+    # Animation-facing API (new)
+    # -------------------------
+
+    def play_sequence_nodes(
+        self,
+        target_sequence: list[AnimationNode],
+        replace: bool = True,
+        force_restart: bool = False,
+    ):
+        self.animator.play_sequence_nodes(
+            target_sequence=target_sequence,
+            replace=replace,
+            force_restart=force_restart,
+        )
+
+    def play_node(
+        self,
+        node: AnimationNode,
+        replace: bool = True,
+        force_restart: bool = False,
+    ):
+        self.play_sequence_nodes(
+            [node],
+            replace=replace,
+            force_restart=force_restart,
+        )
+
+    def interrupt_animation(
+        self,
+        node: AnimationNode,
+        recovery_targets: list[AnimationNode] | None = None,
+    ):
+        self.animator.interrupt_with(
+            node=node,
+            recovery_targets=recovery_targets,
+        )
+
+    def resolve_animation_interrupt(self):
+        self.animator.resolve_interrupt()
+
+    def current_animation_node(self) -> AnimationNode | None:
+        return self.animator.current_node
+
+    # -------------------------
+    # Legacy logical-state bridge (temporary)
+    # -------------------------
+
+    def set_state(self, new_state: PetState, force: bool = False):
+        """
+        ВРЕМЕННЫЙ мост для старых модулей (controller / motion / cursor_ai / needs),
+        которые пока ещё думают в PetState.
+
+        После переписывания этих модулей этот метод можно удалить.
+        """
+        if force or self.current_state != new_state:
+            self.current_state = new_state
+            self.animator.request_state(new_state, force=force)
+
+    # -------------------------
+    # Facing / orientation
+    # -------------------------
+
+    def set_facing_right(self, value: bool):
+        self.animation_player.set_facing_right(value)
+
+    # -------------------------
+    # Animation / state hooks
+    # -------------------------
 
     def on_frame_changed(self, pixmap):
         if self._position_initialized:
@@ -92,10 +170,15 @@ class FrameAnimatedPet(QWidget):
             self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
 
     def on_animation_finished(self, animation_name: str):
+        # Сначала даём аниматору обработать очередь / interrupt / transitions
         self.animator.on_animation_finished(animation_name)
 
+        # Затем остальной логике поведения
         self.controller.on_animation_finished(animation_name)
 
+    # -------------------------
+    # Geometry / positioning
+    # -------------------------
 
     def init_position(self):
         screen_rect = self.get_current_screen_rect()
@@ -126,15 +209,9 @@ class FrameAnimatedPet(QWidget):
 
         return x, y
 
-
-    def set_state(self, new_state: PetState, force=False):
-        if force or self.current_state != new_state:
-            self.current_state = new_state
-            self.animator.request_state(new_state, force=force)
-
-    def set_facing_right(self, value: bool):
-        self.animation_player.set_facing_right(value)
-
+    # -------------------------
+    # Event filter for label
+    # -------------------------
 
     def eventFilter(self, obj, event):
         if obj is self.label:
@@ -167,6 +244,7 @@ class FrameAnimatedPet(QWidget):
                         return True
 
                     if self.cursors.current_mode() == InteractionMode.FEED:
+                        # Логика кормления будет переписана позже под новую систему
                         event.accept()
                         return True
 
@@ -194,6 +272,9 @@ class FrameAnimatedPet(QWidget):
 
         return super().eventFilter(obj, event)
 
+    # -------------------------
+    # Mouse handling fallback
+    # -------------------------
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -234,6 +315,9 @@ class FrameAnimatedPet(QWidget):
 
         super().mouseReleaseEvent(event)
 
+    # -------------------------
+    # Context menu
+    # -------------------------
 
     def contextMenuEvent(self, event):
         self.context_menu.show(event.globalPos())
