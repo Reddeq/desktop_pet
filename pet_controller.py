@@ -62,6 +62,14 @@ class PetController(QObject):
         self.pooping_dig_timer.setSingleShot(True)
         self.pooping_dig_timer.timeout.connect(self.finish_pooping_dig_phase)
 
+        self.hiding_wait_timer = QTimer(self)
+        self.hiding_wait_timer.setSingleShot(True)
+        self.hiding_wait_timer.timeout.connect(self.finish_hiding_wait)
+
+        self.hiding_edge: str | None = None   # "left" | "right"
+        self.hiding_target_x: int | None = None
+        self.hiding_run_started = False
+
         self.needs_timer = QTimer(self)
         self.needs_timer.timeout.connect(self._on_needs_tick)
 
@@ -121,6 +129,7 @@ class PetController(QObject):
         self.zoomies_timer.stop()
         self.zoomies_step_timer.stop()
         self.pooping_dig_timer.stop()
+        self.hiding_wait_timer.stop()
 
     # -------------------------
     # High-level logical state
@@ -159,6 +168,40 @@ class PetController(QObject):
             and not self.ctx.is_recovering
         ):
             self.start_pooping_sequence()
+        
+        if self.ctx.is_hiding:
+            needs = self.needs.values
+            if (
+                needs.satiety <= 0.0
+                or needs.energy <= 0.0
+                or needs.mood <= 0.0
+                or needs.bladder <= 0.0
+            ):
+                self._break_hiding_into_fall()
+                return
+
+    def _break_hiding_into_fall(self):
+        if not self.ctx.is_hiding:
+            return
+
+        # Если был полностью скрыт, сначала показываем и ставим в позу hiding у края
+        if self.ctx.is_hidden_offscreen:
+            self.pet.show()
+            self.ctx.is_hidden_offscreen = False
+            self._place_pet_for_hiding_peek()
+
+        self._stop_hiding()
+
+        self.ctx.is_falling = True
+        self._set_logical_state(PetState.FALLING)
+
+        self.pet.interrupt_animation(
+            AnimationNode.FALLING,
+            recovery_targets=[
+                AnimationNode.FALLING_RECOVERY,
+                AnimationNode.STANDING_IDLE,
+            ],
+        )
 
     # -------------------------
     # Animation finished hook
@@ -223,6 +266,19 @@ class PetController(QObject):
     def _stop_sleeping(self):
         self.ctx.is_sleeping = False
 
+    def _stop_hiding(self):
+        self.ctx.is_hiding = False
+        self.ctx.is_hidden_offscreen = False
+        self.hiding_wait_timer.stop()
+
+        self.hiding_edge = None
+        self.hiding_target_x = None
+        self.hiding_run_started = False
+
+        # Если манул был скрыт, показываем обратно
+        if not self.pet.isVisible():
+            self.pet.show()
+
     def _reset_motion_flags(self):
         self.ctx.is_falling = False
         self.ctx.gravity_speed = 0
@@ -238,6 +294,7 @@ class PetController(QObject):
         self._stop_eating()
         self._stop_pooping()
         self._stop_post_pooping_zoomies()
+        self._stop_hiding()
 
 
         self.cursor_ai.cancel()
@@ -450,6 +507,7 @@ class PetController(QObject):
 
         self._sync_notification_sequence()
         self._sync_pooping_sequence()
+        self._sync_hiding_sequence()
 
         self.motion.process_walk_step()
 
@@ -699,3 +757,99 @@ class PetController(QObject):
         self.zoomies_step_timer.stop()
         self.motion.stop_horizontal_motion()
         self.start_idle()
+
+    def _pick_hiding_edge(self) -> tuple[str, int]:
+        screen_rect = self.pet.get_current_screen_rect()
+        margin = 10
+
+        left_x = screen_rect.x() + margin
+        right_x = screen_rect.x() + screen_rect.width() - self.pet.width() - margin
+
+        edge = random.choice(["left", "right"])
+        target_x = left_x if edge == "left" else right_x
+        return edge, target_x
+
+    def _place_pet_for_hiding_peek(self):
+        """
+        Ставит манула частично за край экрана, как будто он выглядывает.
+        """
+        screen_rect = self.pet.get_current_screen_rect()
+
+        min_y = screen_rect.y() + 40
+        max_y = max(min_y, self.pet.ground_y - self.pet.height() - 20)
+        y = random.randint(min_y, max_y)
+
+        if self.hiding_edge == "left":
+            # normal orientation on left edge
+            self.pet.set_facing_right(True)
+            x = screen_rect.x() - int(self.pet.width() * 0.60)
+        else:
+            # mirrored orientation on right edge
+            self.pet.set_facing_right(False)
+            x = screen_rect.x() + screen_rect.width() - int(self.pet.width() * 0.40)
+
+        self.pet.move(x, y)
+
+    def start_hiding_sequence(self):
+        self._reset_motion_flags()
+        self.ctx.is_hiding = True
+        self.ctx.is_hidden_offscreen = False
+        self._set_logical_state(PetState.IDLE)
+
+        self.hiding_edge, self.hiding_target_x = self._pick_hiding_edge()
+        self.hiding_run_started = True
+
+        self.pet.play_node(
+            AnimationNode.RUNNING,
+            replace=True,
+            force_restart=True,
+        )
+
+        started = self.motion.start_run_to_x(self.hiding_target_x)
+        if not started:
+            self._enter_hidden_wait()
+
+    def _enter_hidden_wait(self):
+        if not self.ctx.is_hiding:
+            return
+
+        self.ctx.is_hidden_offscreen = True
+        self.hiding_run_started = False
+
+        self.motion.stop_horizontal_motion()
+        self.pet.hide()
+
+        duration_ms = random.randint(3000, 6000)
+        self.hiding_wait_timer.start(duration_ms)
+
+    def finish_hiding_wait(self):
+        if not self.ctx.is_hiding:
+            return
+
+        self.ctx.is_hidden_offscreen = False
+
+        self.pet.show()
+        self._place_pet_for_hiding_peek()
+
+        # ВАЖНО:
+        # здесь не идём через граф, потому что hiding reveal —
+        # это не обычный переход, а специальное "появление из-за края"
+        self.pet.force_set_animation_node(
+            AnimationNode.HIDING,
+            hold=True,
+        )
+
+    def _sync_hiding_sequence(self):
+        if not self.ctx.is_hiding:
+            return
+
+        # Пока реально бежим к краю
+        if self.hiding_run_started and not self.ctx.is_walking:
+            self._enter_hidden_wait()
+
+    def debug_start_hiding(self):
+        """
+        Принудительно запускает hiding-сценарий из debug-консоли.
+        """
+        print("[debug] starting hiding sequence")
+        self.start_hiding_sequence()

@@ -33,6 +33,8 @@ class FrameAnimatedPet(QWidget):
         self.current_state: PetState | None = None
 
         self._position_initialized = False
+        self.bound_screen = None
+        self.drag_locked_screen = None
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -114,6 +116,9 @@ class FrameAnimatedPet(QWidget):
             force_restart=force_restart,
         )
 
+    def force_set_animation_node(self, node: AnimationNode, hold: bool = True):
+        self.animator.force_set_node(node=node, hold=hold)
+
     def interrupt_animation(
         self,
         node: AnimationNode,
@@ -180,23 +185,59 @@ class FrameAnimatedPet(QWidget):
         # Затем остальной логике поведения
         self.controller.on_animation_finished(animation_name)
 
+    def get_screen_for_point(self, global_point):
+        screen = QGuiApplication.screenAt(global_point)
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        return screen
+
+    def get_bound_screen(self):
+        """
+        Экран-владелец манула.
+        Если ещё не задан — определяем по центру окна.
+        """
+        if self.bound_screen is not None:
+            return self.bound_screen
+
+        center_point = self.frameGeometry().center()
+        self.bound_screen = self.get_screen_for_point(center_point)
+        return self.bound_screen
+
+    def bind_to_screen(self, screen):
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        self.bound_screen = screen
+
+    def lock_drag_to_current_screen(self):
+        self.drag_locked_screen = self.get_bound_screen()
+
+    def unlock_drag_screen(self):
+        self.drag_locked_screen = None
+
+    def get_active_clamp_screen(self):
+        """
+        Во время drag clamp идёт по экрану, на котором манула схватили.
+        В остальное время — по bound_screen.
+        """
+        if self.drag_locked_screen is not None:
+            return self.drag_locked_screen
+        return self.get_bound_screen()
+
     # -------------------------
     # Geometry / positioning
     # -------------------------
 
     def init_position(self):
-        screen_rect = self.get_current_screen_rect()
+        screen = QGuiApplication.primaryScreen()
+        self.bind_to_screen(screen)
+
+        screen_rect = screen.availableGeometry()
         start_x = screen_rect.x() + (screen_rect.width() - self.width()) // 2
         self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
         self.move(start_x, self.ground_y)
 
     def get_current_screen_rect(self):
-        center_point = self.frameGeometry().center()
-        screen = QGuiApplication.screenAt(center_point)
-
-        if screen is None:
-            screen = QGuiApplication.primaryScreen()
-
+        screen = self.get_active_clamp_screen()
         return screen.availableGeometry()
 
     def clamp_position(self, x, y):
@@ -206,7 +247,7 @@ class FrameAnimatedPet(QWidget):
         max_x = screen_rect.x() + screen_rect.width() - self.width()
 
         min_y = screen_rect.y()
-        max_y = self.ground_y
+        max_y = screen_rect.y() + screen_rect.height() - self.height()
 
         x = max(min_x, min(x, max_x))
         y = max(min_y, min(y, max_y))
@@ -244,6 +285,7 @@ class FrameAnimatedPet(QWidget):
                 if event.button() == Qt.MouseButton.LeftButton:
                     if self.cursors.current_mode() == InteractionMode.GRAB:
                         self.setCursor(self.cursors.get_drag_cursor())
+                        self.lock_drag_to_current_screen()
                         self.controller.on_mouse_press(event.globalPosition())
                         return True
 
@@ -273,6 +315,7 @@ class FrameAnimatedPet(QWidget):
                 if event.button() == Qt.MouseButton.LeftButton:
                     if self.cursors.current_mode() == InteractionMode.GRAB:
                         self.controller.on_mouse_release()
+                        self.unlock_drag_screen()
                         self.cursors.apply_to_widget(self)
                         return True
 
@@ -291,6 +334,7 @@ class FrameAnimatedPet(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.cursors.current_mode() == InteractionMode.GRAB:
                 self.setCursor(self.cursors.get_drag_cursor())
+                self.lock_drag_to_current_screen()
                 self.controller.on_mouse_press(event.globalPosition())
                 return
 
@@ -314,9 +358,10 @@ class FrameAnimatedPet(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+       if event.button() == Qt.MouseButton.LeftButton:
             if self.cursors.current_mode() == InteractionMode.GRAB:
                 self.controller.on_mouse_release()
+                self.unlock_drag_screen()
                 self.cursors.apply_to_widget(self)
                 return
 
@@ -325,7 +370,7 @@ class FrameAnimatedPet(QWidget):
                 self.cursors.apply_to_widget(self)
                 return
 
-        super().mouseReleaseEvent(event)
+       super().mouseReleaseEvent(event)
 
     # -------------------------
     # Context menu

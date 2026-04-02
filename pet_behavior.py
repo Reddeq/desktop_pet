@@ -33,6 +33,7 @@ class PetBehavior(QObject):
             or self.ctx.is_eating
             or self.ctx.is_pooping
             or self.ctx.is_post_pooping_zoomies
+            or self.ctx.is_hiding
 
         )
 
@@ -83,6 +84,10 @@ class PetBehavior(QObject):
 
         if self.controller.needs.is_sleepy(self.ctx.sleep_energy_threshold):
             self.controller.start_sleep()
+            return
+
+        if random.random() < self.ctx.hiding_trigger_chance:
+            self.controller.start_hiding_sequence()
             return
 
         # begging for food if satiety < 50

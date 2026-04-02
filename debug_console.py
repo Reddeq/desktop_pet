@@ -63,6 +63,7 @@ class DebugConsole(QObject):
             self.command_received.emit(line)
 
     @pyqtSlot(str)
+    @pyqtSlot(str)
     def handle_command(self, line: str):
         parts = line.split()
         if not parts:
@@ -76,6 +77,10 @@ class DebugConsole(QObject):
 
         if cmd == "show":
             self.controller.debug_print_needs()
+            return
+
+        if cmd in {"hide", "hiding"}:
+            self.controller.debug_start_hiding()
             return
 
         if cmd in {"satiety", "energy", "mood", "bladder", "toilet"}:
@@ -107,5 +112,7 @@ class DebugConsole(QObject):
         print("  mood <0..100>")
         print("  bladder <0..100>")
         print("  toilet <0..100>   # alias for bladder")
+        print("  hide              # force hiding scenario")
+        print("  hiding            # alias for hide")
         print("  show")
         print("  help")

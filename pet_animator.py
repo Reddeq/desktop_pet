@@ -323,3 +323,20 @@ class PetAnimator(QObject):
             return True
 
         return False
+
+    def force_set_node(self, node: AnimationNode, hold: bool = True):
+        """
+        Принудительно устанавливает текущий animation node,
+        минуя поиск пути по графу.
+
+        Нужен для специальных сценариев вроде:
+        - hiding reveal после исчезновения за край экрана
+        - других телепортирующихся / вне-графовых состояний
+        """
+        self.expanded_queue.clear()
+        self.bridge_timer.stop()
+
+        self.current_node = node
+        self.current_step = AnimationStep(node=node, hold=hold)
+
+        self._play_node(node, force=True)

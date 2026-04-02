@@ -591,6 +591,7 @@ class PetCursorAI(QObject):
             or self.ctx.cursor_chase_cooldown
             or self.ctx.is_pooping
             or self.ctx.is_post_pooping_zoomies
+            or self.ctx.is_hiding
         ):
             return
 
@@ -604,6 +605,8 @@ class PetCursorAI(QObject):
     # -------------------------
 
     def process_chase_step(self) -> bool:
+        if self.ctx.is_hiding:
+            return False
         if self.ctx.is_pooping or self.ctx.is_post_pooping_zoomies:
             return False
         if self.ctx.is_eating:

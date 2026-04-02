@@ -19,6 +19,11 @@ class PetContext:
     is_eating: bool = False
     is_pooping: bool = False
     is_post_pooping_zoomies: bool = False
+    is_hiding: bool = False
+    is_hidden_offscreen: bool = False
+
+    # ~раз в 5 минут при logic tick 5 сек => примерно 1 / 60
+    hiding_trigger_chance: float = 1.0 / 60.0
 
     # По какому порогу считаем, что пора срочно в туалет
     poop_bladder_threshold: float = 0.0
