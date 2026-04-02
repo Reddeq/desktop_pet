@@ -42,6 +42,26 @@ class PetController(QObject):
         self.meowing_timer.setSingleShot(True)
         self.meowing_timer.timeout.connect(self.finish_meowing)
 
+        self.pooping_timer = QTimer(self)
+        self.pooping_timer.setSingleShot(True)
+        self.pooping_timer.timeout.connect(self.finish_pooping_phase)
+
+        self.zoomies_timer = QTimer(self)
+        self.zoomies_timer.setSingleShot(True)
+        self.zoomies_timer.timeout.connect(self.finish_post_pooping_zoomies)
+
+        self.zoomies_step_timer = QTimer(self)
+        self.zoomies_step_timer.setSingleShot(True)
+        self.zoomies_step_timer.timeout.connect(self._start_next_zoomies_run)
+
+        self.pooping_target_x: int | None = None
+        self.pooping_motion_started = False
+        self.pooping_phase_started = False
+        self.post_pooping_dig_started = False
+        self.pooping_dig_timer = QTimer(self)
+        self.pooping_dig_timer.setSingleShot(True)
+        self.pooping_dig_timer.timeout.connect(self.finish_pooping_dig_phase)
+
         self.needs_timer = QTimer(self)
         self.needs_timer.timeout.connect(self._on_needs_tick)
 
@@ -97,6 +117,10 @@ class PetController(QObject):
         self.cursor_ai.stop()
         self.scratching_timer.stop()
         self.meowing_timer.stop()
+        self.pooping_timer.stop()
+        self.zoomies_timer.stop()
+        self.zoomies_step_timer.stop()
+        self.pooping_dig_timer.stop()
 
     # -------------------------
     # High-level logical state
@@ -124,6 +148,17 @@ class PetController(QObject):
 
         if self.ctx.is_sleeping and self.needs.values.energy >= 100.0:
             self.finish_sleep()
+            return
+
+        if (
+            self.needs.values.bladder <= self.ctx.poop_bladder_threshold
+            and not self.ctx.is_pooping
+            and not self.ctx.is_post_pooping_zoomies
+            and not self.ctx.is_dragging
+            and not self.ctx.is_falling
+            and not self.ctx.is_recovering
+        ):
+            self.start_pooping_sequence()
 
     # -------------------------
     # Animation finished hook
@@ -166,6 +201,21 @@ class PetController(QObject):
     def _stop_eating(self):
         self.ctx.is_eating = False
 
+    def _stop_pooping(self):
+        self.ctx.is_pooping = False
+        self.pooping_timer.stop()
+        self.pooping_dig_timer.stop()
+
+        self.pooping_target_x = None
+        self.pooping_motion_started = False
+        self.pooping_phase_started = False
+        self.post_pooping_dig_started = False
+
+    def _stop_post_pooping_zoomies(self):
+        self.ctx.is_post_pooping_zoomies = False
+        self.zoomies_timer.stop()
+        self.zoomies_step_timer.stop()
+
     def _stop_scratching_for_food(self):
         self.ctx.is_scratching_for_food = False
         self.scratching_timer.stop()
@@ -186,6 +236,9 @@ class PetController(QObject):
         self._stop_eating()
         self._stop_sleeping()
         self._stop_eating()
+        self._stop_pooping()
+        self._stop_post_pooping_zoomies()
+
 
         self.cursor_ai.cancel()
         
@@ -390,15 +443,15 @@ class PetController(QObject):
     # -------------------------
 
     def process_walk_step(self):
-        # Cursor AI может полностью перехватить движение
         if self.cursor_ai.process_chase_step():
             return
 
-        # Синхронизация notification-sequence с motion/dig
         self._sync_notification_sequence()
+        self._sync_pooping_sequence()
 
-        # Физическое движение
         self.motion.process_walk_step()
+
+        self._sync_post_pooping_zoomies()
 
     # -------------------------
     # Gravity / falling recovery
@@ -485,3 +538,155 @@ class PetController(QObject):
         print(f"mood:    {needs['mood']:.2f}")
         print(f"bladder: {needs['bladder']:.2f}")
         print("=================")
+
+    def _get_corner_target_x(self) -> int:
+        screen_rect = self.pet.get_current_screen_rect()
+        margin = 20
+
+        left_x = screen_rect.x() + margin
+        right_x = screen_rect.x() + screen_rect.width() - self.pet.width() - margin
+
+        return random.choice([left_x, right_x])
+
+    def start_pooping_sequence(self):
+        """
+        Срочный туалетный сценарий:
+            RUNNING -> POOPING -> DIGGING -> zoomies
+        """
+        self._reset_motion_flags()
+        self.ctx.is_pooping = True
+        self._set_logical_state(PetState.IDLE)
+
+        self.pooping_target_x = self._get_corner_target_x()
+        self.pooping_motion_started = False
+        self.pooping_phase_started = False
+        self.post_pooping_dig_started = False
+
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.RUNNING,
+                AnimationNode.POOPING,
+                AnimationNode.DIGGING,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+
+    def _sync_pooping_sequence(self):
+        if not self.ctx.is_pooping:
+            return
+
+        current_node = self.pet.current_animation_node()
+
+        # 1) Sequence дошла до RUNNING -> запускаем движение в угол
+        if (
+            current_node == AnimationNode.RUNNING
+            and not self.pooping_motion_started
+            and self.pooping_target_x is not None
+        ):
+            self.pooping_motion_started = True
+            self._set_logical_state(PetState.RUN)
+            self.motion.start_run_to_x(self.pooping_target_x)
+            return
+
+        # 2) Sequence дошла до POOPING -> запускаем pooping phase timer
+        if (
+            current_node == AnimationNode.POOPING
+            and not self.pooping_phase_started
+        ):
+            self.pooping_phase_started = True
+            self._set_logical_state(PetState.IDLE)
+
+            duration_ms = random.randint(2000, 4000)
+            self.pooping_timer.start(duration_ms)
+            return
+
+    def _sync_post_pooping_zoomies(self):
+        if not self.ctx.is_post_pooping_zoomies:
+            return
+
+        # Если сейчас ещё идёт физическое движение — ждём
+        if self.ctx.is_walking:
+            return
+
+        current_node = self.pet.current_animation_node()
+
+        # Как только очередной run-сегмент закончился и аниматор вышел в standing_idle,
+        # запускаем следующий рывок через короткую паузу
+        if current_node == AnimationNode.STANDING_IDLE:
+            if not self.zoomies_step_timer.isActive():
+                delay_ms = random.randint(250, 700)
+                self.zoomies_step_timer.start(delay_ms)
+
+    def finish_pooping_phase(self):
+        if not self.ctx.is_pooping:
+            return
+
+        # После pooping bladder полностью восстанавливается
+        self.needs.use_toilet()
+
+        # Переходим в digging как отдельную фазу
+        self.post_pooping_dig_started = True
+        self.pet.play_node(
+            AnimationNode.DIGGING,
+            replace=True,
+            force_restart=True,
+        )
+
+        duration_ms = random.randint(1500, 2500)
+        self.pooping_dig_timer.start(duration_ms)
+
+    def finish_pooping_dig_phase(self):
+        if not self.ctx.is_pooping:
+            return
+
+        self.start_post_pooping_zoomies()
+
+    def start_post_pooping_zoomies(self):
+        self.ctx.is_pooping = False
+        self.ctx.is_post_pooping_zoomies = True
+        self._set_logical_state(PetState.RUN)
+
+        duration_ms = random.randint(10_000, 20_000)
+        self.zoomies_timer.start(duration_ms)
+
+        self._start_next_zoomies_run()
+
+    def _start_next_zoomies_run(self):
+        if not self.ctx.is_post_pooping_zoomies:
+            return
+
+        screen_rect = self.pet.get_current_screen_rect()
+        margin = 20
+
+        left_x = screen_rect.x() + margin
+        right_x = screen_rect.x() + screen_rect.width() - self.pet.width() - margin
+
+        current_x = self.pet.x()
+
+        # Выбираем новую цель, отличную от текущей позиции
+        for _ in range(6):
+            target_x = random.randint(left_x, right_x)
+            if abs(target_x - current_x) >= 40:
+                break
+        else:
+            target_x = left_x if current_x > (left_x + right_x) // 2 else right_x
+
+        # RUNNING делаем НЕ финальным target, чтобы после завершения движения
+        # аниматор смог выйти из него
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.RUNNING,
+                AnimationNode.STANDING_IDLE,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+
+        self.motion.start_run_to_x(target_x)
+
+    def finish_post_pooping_zoomies(self):
+        self.ctx.is_post_pooping_zoomies = False
+        self.zoomies_step_timer.stop()
+        self.motion.stop_horizontal_motion()
+        self.start_idle()

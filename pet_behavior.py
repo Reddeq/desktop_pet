@@ -31,6 +31,8 @@ class PetBehavior(QObject):
             or self.ctx.is_swatting_cursor
             or self.ctx.is_scratching_for_food
             or self.ctx.is_eating
+            or self.ctx.is_pooping
+            or self.ctx.is_post_pooping_zoomies
 
         )
 

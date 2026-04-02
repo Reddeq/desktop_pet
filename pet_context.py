@@ -17,7 +17,11 @@ class PetContext:
     is_sleeping: bool = False
     is_meowing: bool = False
     is_eating: bool = False
+    is_pooping: bool = False
+    is_post_pooping_zoomies: bool = False
 
+    # По какому порогу считаем, что пора срочно в туалет
+    poop_bladder_threshold: float = 0.0
 
     is_investigating_notifications: bool = False
     is_chasing_cursor: bool = False

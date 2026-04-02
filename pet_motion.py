@@ -127,3 +127,10 @@ class PetMotion(QObject):
         К этому моменту PetAnimator уже должен был пройти recovery sequence.
         """
         self.ctx.is_recovering = False
+
+    def stop_horizontal_motion(self):
+        """
+        Немедленно останавливает текущий walk/run сегмент.
+        """
+        self.ctx.is_walking = False
+        self.ctx.walk_target_x = self.pet.x()
