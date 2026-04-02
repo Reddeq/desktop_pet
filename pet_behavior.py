@@ -30,6 +30,7 @@ class PetBehavior(QObject):
             or self.ctx.is_chasing_cursor
             or self.ctx.is_swatting_cursor
             or self.ctx.is_scratching_for_food
+            or self.ctx.is_eating
 
         )
 
@@ -91,14 +92,25 @@ class PetBehavior(QObject):
             self.controller.start_scratching_for_food()
             return
 
-        actions = [
-            "idle",
-            "walk",
-            "cleaning",
-            "investigate_notifications",
-        ]
-        weights = [0.45, 0.25, 0.20, 0.10]
+        
+        mood = self.controller.needs.values.mood
 
+        if mood < 50.0:
+            actions = [
+                "idle",
+                "walk",
+                "cleaning",
+                "meowing",
+            ]
+            weights = [0.45, 0.25, 0.20, 0.10]
+        else:
+            actions = [
+                "idle",
+                "walk",
+                "cleaning",
+                "investigate_notifications",
+            ]
+            weights = [0.45, 0.25, 0.20, 0.10]
         new_action = random.choices(actions, weights=weights)[0]
 
         if new_action == "walk":
@@ -110,8 +122,12 @@ class PetBehavior(QObject):
         elif new_action == "investigate_notifications":
             self.controller.start_notification_investigation()
 
+        elif new_action == "meowing":
+            self.controller.start_meowing()
+
         else:
             self.start_idle_scenario()
+
 
 
     def _food_begging_chance(self) -> float:

@@ -224,3 +224,30 @@ class PetNeeds(QObject):
 
     def needs_toilet(self, threshold: float = 30.0) -> bool:
         return self.values.bladder <= threshold
+
+    def set_need(self, name: str, value: float) -> bool:
+        """
+        Универсальная установка конкретной нужды по имени.
+        Возвращает True, если имя валидно.
+        """
+        aliases = {
+            "satiety": "satiety",
+            "energy": "energy",
+            "mood": "mood",
+            "bladder": "bladder",
+            "toilet": "bladder",
+        }
+
+        key = aliases.get(name.strip().lower())
+        if key is None:
+            return False
+
+        setattr(self.values, key, _clamp(float(value)))
+        self.needs_changed.emit(self.snapshot())
+        return True
+
+    def debug_set_need(self, name: str, value: float) -> bool:
+        """
+        Явный alias для отладочных команд.
+        """
+        return self.set_need(name, value)

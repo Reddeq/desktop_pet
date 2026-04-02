@@ -13,6 +13,7 @@ from pet_animator import PetAnimator
 from pet_context_menu import PetContextMenuManager
 from pet_controller import PetController
 from pet_state import PetState
+from debug_console import DebugConsole
 
 
 def get_resource_base_dir():
@@ -73,6 +74,9 @@ class FrameAnimatedPet(QWidget):
 
         self.controller = PetController(self, self)
         self.controller.start()
+
+        self.debug_console = DebugConsole(self.controller, self)
+        self.debug_console.start()
 
         # Стартовое логическое состояние — пока оставляем для старых модулей
         self.current_state = PetState.IDLE

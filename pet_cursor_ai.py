@@ -457,6 +457,9 @@ class PetCursorAI(QObject):
     # -------------------------
 
     def check_cursor_proximity(self):
+        if self.ctx.is_eating:
+            return
+
         cursor_pos = self._update_cursor_motion_state()
 
         rear_zone_now = (
@@ -490,6 +493,7 @@ class PetCursorAI(QObject):
             and not self.ctx.is_recovering
             and not self.ctx.is_cleaning
             and not self.ctx.is_sleeping
+            and not self.ctx.is_eating
             and not self.ctx.is_investigating_notifications
             and not self.ctx.cursor_chase_cooldown
         ):
@@ -596,6 +600,9 @@ class PetCursorAI(QObject):
     # -------------------------
 
     def process_chase_step(self) -> bool:
+        if self.ctx.is_eating:
+            return False
+
         if self.ctx.is_swatting_cursor:
             return True
 

@@ -38,6 +38,10 @@ class PetController(QObject):
         self.scratching_timer.setSingleShot(True)
         self.scratching_timer.timeout.connect(self.finish_scratching_for_food)
 
+        self.meowing_timer = QTimer(self)
+        self.meowing_timer.setSingleShot(True)
+        self.meowing_timer.timeout.connect(self.finish_meowing)
+
         self.needs_timer = QTimer(self)
         self.needs_timer.timeout.connect(self._on_needs_tick)
 
@@ -92,6 +96,7 @@ class PetController(QObject):
         self.needs_timer.stop()
         self.cursor_ai.stop()
         self.scratching_timer.stop()
+        self.meowing_timer.stop()
 
     # -------------------------
     # High-level logical state
@@ -125,21 +130,18 @@ class PetController(QObject):
     # -------------------------
 
     def on_animation_finished(self, animation_name: str):
-        """
-        Controller не управляет обычными переходами анимаций вручную —
-        это делает PetAnimator.
-
-        Здесь остаются только side-effects сценариев/логики.
-        """
         try:
             finished_node = AnimationNode(animation_name)
         except ValueError:
             return
 
-        # После завершения falling_recovery one-shot
-        # логически завершаем recovery state
         if finished_node == AnimationNode.FALLING_RECOVERY and self.ctx.is_recovering:
             self.motion.finish_fall_recovery()
+            return
+
+        if finished_node == AnimationNode.EATING and self.ctx.is_eating:
+            self.finish_eating()
+            return
 
     # -------------------------
     # Internal state cleanup
@@ -157,6 +159,13 @@ class PetController(QObject):
         self.notification_motion_started = False
         self.notification_dig_started = False
 
+    def _stop_meowing(self):
+        self.ctx.is_meowing = False
+        self.meowing_timer.stop()
+
+    def _stop_eating(self):
+        self.ctx.is_eating = False
+
     def _stop_scratching_for_food(self):
         self.ctx.is_scratching_for_food = False
         self.scratching_timer.stop()
@@ -172,8 +181,11 @@ class PetController(QObject):
 
         self._stop_cleaning()
         self._stop_notification_investigation()
+        self._stop_meowing()
         self._stop_scratching_for_food()
+        self._stop_eating()
         self._stop_sleeping()
+        self._stop_eating()
 
         self.cursor_ai.cancel()
         
@@ -189,33 +201,17 @@ class PetController(QObject):
         self.needs.use_toilet()
 
     def try_feed(self) -> bool:
-        """
-        Если манул голоден (< 50), кормим:
-        - immediately EATING
-        - satiety = 100
-        - bladder -= 50
-        """
         if self.ctx.is_sleeping:
             return False
 
         if self.needs.values.satiety >= self.ctx.food_begging_satiety_threshold:
             return False
 
-        self._reset_motion_flags()
         self.needs.feed_full_meal(
             bladder_penalty=self.ctx.feed_full_meal_bladder_penalty
         )
 
-        self._set_logical_state(PetState.IDLE)
-
-        self.pet.play_sequence_nodes(
-            [
-                AnimationNode.EATING,
-                AnimationNode.SITTING_IDLE,
-            ],
-            replace=True,
-            force_restart=True,
-        )
+        self.start_eating()
         return True
 
     # -------------------------
@@ -330,6 +326,24 @@ class PetController(QObject):
             self.dig_timer.start(duration_ms)
             return
 
+    def start_eating(self):
+        self._reset_motion_flags()
+        self.ctx.is_eating = True
+        self._set_logical_state(PetState.IDLE)
+
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.EATING,
+                AnimationNode.SITTING_IDLE,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+
+    def finish_eating(self):
+        self.ctx.is_eating = False
+        self.start_idle()
+
     def finish_notification_investigation(self):
         self._stop_notification_investigation()
         self.start_idle()
@@ -350,6 +364,25 @@ class PetController(QObject):
 
     def finish_scratching_for_food(self):
         self.ctx.is_scratching_for_food = False
+        self.start_idle()
+
+
+    def start_meowing(self):
+        self._reset_motion_flags()
+        self.ctx.is_meowing = True
+        self._set_logical_state(PetState.IDLE)
+
+        self.pet.play_node(
+            AnimationNode.MEOWING,
+            replace=True,
+            force_restart=True,
+        )
+
+        duration_ms = random.randint(1200, 2200)
+        self.meowing_timer.start(duration_ms)
+
+    def finish_meowing(self):
+        self.ctx.is_meowing = False
         self.start_idle()
 
     # -------------------------
@@ -421,3 +454,34 @@ class PetController(QObject):
             # Если отпустили сразу на земле — завершаем interrupt без физического падения
             self.ctx.is_recovering = True
             self.pet.resolve_animation_interrupt()
+
+    def set_need_value(self, name: str, value: float) -> bool:
+        ok = self.needs.debug_set_need(name, value)
+        if not ok:
+            return False
+
+        # Если руками подняли сытость выше food-begging threshold,
+        # и манул сейчас просит еду — можно вернуть его в idle.
+        if (
+            self.ctx.is_scratching_for_food
+            and self.needs.values.satiety >= self.ctx.food_begging_satiety_threshold
+        ):
+            self.finish_scratching_for_food()
+
+        # Если во сне руками подняли энергию до 100 — будим.
+        if self.ctx.is_sleeping and self.needs.values.energy >= 100.0:
+            self.finish_sleep()
+
+        return True
+
+    def debug_print_needs(self):
+        needs = self.needs.snapshot()
+
+        print("=== Pet needs ===")
+        print(f"Logical state: {self.pet.current_state}")
+        print(f"Animation node: {self.pet.current_animation_node()}")
+        print(f"satiety: {needs['satiety']:.2f}")
+        print(f"energy:  {needs['energy']:.2f}")
+        print(f"mood:    {needs['mood']:.2f}")
+        print(f"bladder: {needs['bladder']:.2f}")
+        print("=================")

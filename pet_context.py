@@ -15,6 +15,9 @@ class PetContext:
     is_recovering: bool = False
     is_cleaning: bool = False
     is_sleeping: bool = False
+    is_meowing: bool = False
+    is_eating: bool = False
+
 
     is_investigating_notifications: bool = False
     is_chasing_cursor: bool = False
