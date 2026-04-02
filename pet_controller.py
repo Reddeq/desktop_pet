@@ -364,7 +364,9 @@ class PetController(QObject):
         ):
             self.notification_motion_started = True
             self._set_logical_state(PetState.RUN)
-            self.motion.start_run_to_x(self.notification_target_x)
+            started = self.motion.start_run_to_x(self.notification_target_x)
+            if not started:
+                self.pet.animator.notify_motion_complete()
             return
 
         # Когда sequence реально дошла до DIGGING — запускаем digging phase
@@ -586,7 +588,9 @@ class PetController(QObject):
         ):
             self.pooping_motion_started = True
             self._set_logical_state(PetState.RUN)
-            self.motion.start_run_to_x(self.pooping_target_x)
+            started = self.motion.start_run_to_x(self.pooping_target_x)
+            if not started:
+                self.pet.animator.notify_motion_complete()
             return
 
         # 2) Sequence дошла до POOPING -> запускаем pooping phase timer
@@ -683,7 +687,12 @@ class PetController(QObject):
             force_restart=True,
         )
 
-        self.motion.start_run_to_x(target_x)
+        started = self.motion.start_run_to_x(target_x)
+        if not started:
+            # если вдруг цель совпала с текущей позицией,
+            # просто пробуем ещё раз позже
+            if self.ctx.is_post_pooping_zoomies and not self.zoomies_step_timer.isActive():
+                self.zoomies_step_timer.start(200)
 
     def finish_post_pooping_zoomies(self):
         self.ctx.is_post_pooping_zoomies = False

@@ -43,16 +43,15 @@ class PetBehavior(QObject):
     def start_walk_scenario(self):
         """
         Случайное блуждание:
-        - animation sequence: WALKING -> SITTING_IDLE
-        - физическое движение: через PetMotion
-
-        ВАЖНО:
-        WALKING здесь НЕ финальный target, чтобы после
-        notify_motion_complete() аниматор мог перейти дальше
-        к SITTING_IDLE.
+        - сначала проверяем, возможно ли реальное движение;
+        - только потом запускаем animation sequence.
         """
         direction = random.choice([-1, 1])
         distance = random.randint(60, 180)
+
+        if not self.motion.start_walk(direction, distance):
+            self.controller.start_idle()
+            return
 
         self.controller._set_logical_state(PetState.WALK)
 
@@ -64,8 +63,6 @@ class PetBehavior(QObject):
             replace=True,
             force_restart=True,
         )
-
-        self.motion.start_walk(direction, distance)
 
     def start_idle_scenario(self):
         """
