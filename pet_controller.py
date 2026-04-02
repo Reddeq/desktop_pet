@@ -507,10 +507,10 @@ class PetController(QObject):
 
         self._sync_notification_sequence()
         self._sync_pooping_sequence()
-        self._sync_hiding_sequence()
-
+        
         self.motion.process_walk_step()
 
+        self._sync_hiding_sequence()
         self._sync_post_pooping_zoomies()
 
     # -------------------------
@@ -825,6 +825,7 @@ class PetController(QObject):
         self.hiding_run_started = False
 
         self.motion.stop_horizontal_motion()
+
         self.pet.hide()
 
         duration_ms = random.randint(3000, 6000)
@@ -836,23 +837,32 @@ class PetController(QObject):
 
         self.ctx.is_hidden_offscreen = False
 
-        self.pet.show()
-        self._place_pet_for_hiding_peek()
+        screen_rect = self.pet.get_current_screen_rect()
 
-        # ВАЖНО:
-        # здесь не идём через граф, потому что hiding reveal —
-        # это не обычный переход, а специальное "появление из-за края"
-        self.pet.force_set_animation_node(
-            AnimationNode.HIDING,
-            hold=True,
+        min_y = screen_rect.y() + 40
+        max_y = max(
+            min_y,
+            screen_rect.y() + screen_rect.height() - self.pet.height() - 20,
+        )
+        y = random.randint(min_y, max_y)
+
+        self.pet.start_hiding_reveal(
+            edge=self.hiding_edge,
+            y=y,
+            node=AnimationNode.HIDING,
         )
 
     def _sync_hiding_sequence(self):
         if not self.ctx.is_hiding:
             return
 
-        # Пока реально бежим к краю
-        if self.hiding_run_started and not self.ctx.is_walking:
+        # Если ещё реально бежим к краю — ждём
+        if self.ctx.is_walking:
+            return
+
+        # Если run phase была запущена и движение уже закончилось,
+        # значит пора уходить в hidden wait
+        if self.hiding_run_started:
             self._enter_hidden_wait()
 
     def debug_start_hiding(self):

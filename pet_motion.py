@@ -83,25 +83,33 @@ class PetMotion(QObject):
 
         current_node = self.pet.current_animation_node()
 
-        # Двигаемся только если аниматор реально находится
-        # в motion-capable animation node.
         if current_node not in self.motion_animation_nodes:
             return
 
         current_x = self.pet.x()
 
         if self.ctx.walk_direction == 1:
-            new_x = min(current_x + self.ctx.walk_speed, self.ctx.walk_target_x)
+            raw_next_x = min(current_x + self.ctx.walk_speed, self.ctx.walk_target_x)
         else:
-            new_x = max(current_x - self.ctx.walk_speed, self.ctx.walk_target_x)
+            raw_next_x = max(current_x - self.ctx.walk_speed, self.ctx.walk_target_x)
 
-        new_x, new_y = self.pet.clamp_position(new_x, self.pet.ground_y)
+        new_x, new_y = self.pet.clamp_position(raw_next_x, self.pet.ground_y)
+
         self.pet.move(new_x, new_y)
 
+        # 1) Обычное успешное достижение цели
         if new_x == self.ctx.walk_target_x:
             self.ctx.is_walking = False
             self.pet.animator.notify_motion_complete()
+            return
 
+        # 2) Защита: если clamp не даёт сдвинуться дальше,
+        #    считаем движение завершённым/заблокированным
+        if new_x == current_x:
+            self.ctx.is_walking = False
+            self.ctx.walk_target_x = new_x
+            self.pet.animator.notify_motion_complete()
+    
     # -------------------------
     # Gravity / landing / interrupt recovery
     # -------------------------

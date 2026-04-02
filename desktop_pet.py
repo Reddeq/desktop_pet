@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel
 from PyQt6.QtGui import QGuiApplication, QIcon
-from PyQt6.QtCore import Qt, QEvent
+from PyQt6.QtCore import Qt, QEvent, QPoint, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
 
 from animation_node import AnimationNode
 from animation_player import AnimationPlayer
@@ -33,6 +33,9 @@ class FrameAnimatedPet(QWidget):
         self.current_state: PetState | None = None
 
         self._position_initialized = False
+        self.hiding_reveal_group = None
+        self.hiding_reveal_pos_anim = None
+        self.hiding_reveal_opacity_anim = None
         self.bound_screen = None
         self.drag_locked_screen = None
 
@@ -253,6 +256,66 @@ class FrameAnimatedPet(QWidget):
         y = max(min_y, min(y, max_y))
 
         return x, y
+
+    def start_hiding_reveal(self, edge: str, y: int, node: AnimationNode):
+        """
+        Плавное появление у края экрана:
+        - окно полностью внутри экрана,
+        - лёгкий slide к краю,
+        - fade-in opacity.
+
+        edge: "left" | "right"
+        node: обычно AnimationNode.HIDING
+        """
+        screen_rect = self.get_current_screen_rect()
+
+        if edge == "left":
+            final_x = screen_rect.x()
+            start_x = final_x + max(18, int(self.width() * 0.18))
+            self.set_facing_right(True)
+        else:
+            final_x = screen_rect.x() + screen_rect.width() - self.width()
+            start_x = final_x - max(18, int(self.width() * 0.18))
+            self.set_facing_right(False)
+
+        # Гарантируем, что обе позиции внутри экрана
+        start_x, y = self.clamp_position(start_x, y)
+        final_x, y = self.clamp_position(final_x, y)
+
+        # Сразу ставим нужный animation node
+        self.force_set_animation_node(node, hold=True)
+
+        # Начальная позиция и прозрачность
+        self.move(start_x, y)
+        self.setWindowOpacity(0.0)
+        self.show()
+
+        # Если старая reveal-анимация ещё жива — обрываем её
+        if self.hiding_reveal_group is not None:
+            self.hiding_reveal_group.stop()
+
+        self.hiding_reveal_pos_anim = QPropertyAnimation(self, b"pos", self)
+        self.hiding_reveal_pos_anim.setDuration(260)
+        self.hiding_reveal_pos_anim.setStartValue(QPoint(start_x, y))
+        self.hiding_reveal_pos_anim.setEndValue(QPoint(final_x, y))
+        self.hiding_reveal_pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self.hiding_reveal_opacity_anim = QPropertyAnimation(self, b"windowOpacity", self)
+        self.hiding_reveal_opacity_anim.setDuration(220)
+        self.hiding_reveal_opacity_anim.setStartValue(0.0)
+        self.hiding_reveal_opacity_anim.setEndValue(1.0)
+        self.hiding_reveal_opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        self.hiding_reveal_group = QParallelAnimationGroup(self)
+        self.hiding_reveal_group.addAnimation(self.hiding_reveal_pos_anim)
+        self.hiding_reveal_group.addAnimation(self.hiding_reveal_opacity_anim)
+
+        def _finalize():
+            self.move(final_x, y)
+            self.setWindowOpacity(1.0)
+
+        self.hiding_reveal_group.finished.connect(_finalize)
+        self.hiding_reveal_group.start()
 
     # -------------------------
     # Event filter for label
