@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel
 from PyQt6.QtGui import QGuiApplication, QIcon
-from PyQt6.QtCore import Qt, QEvent, QPoint, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
+from PyQt6.QtCore import Qt, QEvent
 
 from animation_node import AnimationNode
 from animation_player import AnimationPlayer
@@ -33,9 +33,7 @@ class FrameAnimatedPet(QWidget):
         self.current_state: PetState | None = None
 
         self._position_initialized = False
-        self.hiding_reveal_group = None
-        self.hiding_reveal_pos_anim = None
-        self.hiding_reveal_opacity_anim = None
+        self.horizontal_edge_anchor = None   # None | "left" | "right"
         self.bound_screen = None
         self.drag_locked_screen = None
 
@@ -178,6 +176,9 @@ class FrameAnimatedPet(QWidget):
             new_y = old_bottom - self.height()
             self.move(self.x(), new_y)
 
+            # Если есть edge-anchor, после resize удерживаем нужный край
+            self.snap_to_edge_anchor()
+
             screen_rect = self.get_current_screen_rect()
             self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
 
@@ -257,66 +258,6 @@ class FrameAnimatedPet(QWidget):
 
         return x, y
 
-    def start_hiding_reveal(self, edge: str, y: int, node: AnimationNode):
-        """
-        Плавное появление у края экрана:
-        - окно полностью внутри экрана,
-        - лёгкий slide к краю,
-        - fade-in opacity.
-
-        edge: "left" | "right"
-        node: обычно AnimationNode.HIDING
-        """
-        screen_rect = self.get_current_screen_rect()
-
-        if edge == "left":
-            final_x = screen_rect.x()
-            start_x = final_x + max(18, int(self.width() * 0.18))
-            self.set_facing_right(True)
-        else:
-            final_x = screen_rect.x() + screen_rect.width() - self.width()
-            start_x = final_x - max(18, int(self.width() * 0.18))
-            self.set_facing_right(False)
-
-        # Гарантируем, что обе позиции внутри экрана
-        start_x, y = self.clamp_position(start_x, y)
-        final_x, y = self.clamp_position(final_x, y)
-
-        # Сразу ставим нужный animation node
-        self.force_set_animation_node(node, hold=True)
-
-        # Начальная позиция и прозрачность
-        self.move(start_x, y)
-        self.setWindowOpacity(0.0)
-        self.show()
-
-        # Если старая reveal-анимация ещё жива — обрываем её
-        if self.hiding_reveal_group is not None:
-            self.hiding_reveal_group.stop()
-
-        self.hiding_reveal_pos_anim = QPropertyAnimation(self, b"pos", self)
-        self.hiding_reveal_pos_anim.setDuration(260)
-        self.hiding_reveal_pos_anim.setStartValue(QPoint(start_x, y))
-        self.hiding_reveal_pos_anim.setEndValue(QPoint(final_x, y))
-        self.hiding_reveal_pos_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self.hiding_reveal_opacity_anim = QPropertyAnimation(self, b"windowOpacity", self)
-        self.hiding_reveal_opacity_anim.setDuration(220)
-        self.hiding_reveal_opacity_anim.setStartValue(0.0)
-        self.hiding_reveal_opacity_anim.setEndValue(1.0)
-        self.hiding_reveal_opacity_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-
-        self.hiding_reveal_group = QParallelAnimationGroup(self)
-        self.hiding_reveal_group.addAnimation(self.hiding_reveal_pos_anim)
-        self.hiding_reveal_group.addAnimation(self.hiding_reveal_opacity_anim)
-
-        def _finalize():
-            self.move(final_x, y)
-            self.setWindowOpacity(1.0)
-
-        self.hiding_reveal_group.finished.connect(_finalize)
-        self.hiding_reveal_group.start()
-
     # -------------------------
     # Event filter for label
     # -------------------------
@@ -348,7 +289,6 @@ class FrameAnimatedPet(QWidget):
                 if event.button() == Qt.MouseButton.LeftButton:
                     if self.cursors.current_mode() == InteractionMode.GRAB:
                         self.setCursor(self.cursors.get_drag_cursor())
-                        self.lock_drag_to_current_screen()
                         self.controller.on_mouse_press(event.globalPosition())
                         return True
 
@@ -378,7 +318,6 @@ class FrameAnimatedPet(QWidget):
                 if event.button() == Qt.MouseButton.LeftButton:
                     if self.cursors.current_mode() == InteractionMode.GRAB:
                         self.controller.on_mouse_release()
-                        self.unlock_drag_screen()
                         self.cursors.apply_to_widget(self)
                         return True
 
@@ -397,7 +336,6 @@ class FrameAnimatedPet(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.cursors.current_mode() == InteractionMode.GRAB:
                 self.setCursor(self.cursors.get_drag_cursor())
-                self.lock_drag_to_current_screen()
                 self.controller.on_mouse_press(event.globalPosition())
                 return
 
@@ -424,7 +362,6 @@ class FrameAnimatedPet(QWidget):
        if event.button() == Qt.MouseButton.LeftButton:
             if self.cursors.current_mode() == InteractionMode.GRAB:
                 self.controller.on_mouse_release()
-                self.unlock_drag_screen()
                 self.cursors.apply_to_widget(self)
                 return
 
@@ -442,6 +379,64 @@ class FrameAnimatedPet(QWidget):
     def contextMenuEvent(self, event):
         self.context_menu.show(event.globalPos())
 
+    def get_screen_for_point(self, global_point):
+        screen = QGuiApplication.screenAt(global_point)
+        if screen is None:
+            screen = QGuiApplication.primaryScreen()
+        return screen
+
+    def clamp_position_to_screen(self, x, y, screen):
+        screen_rect = screen.availableGeometry()
+
+        min_x = screen_rect.x()
+        max_x = screen_rect.x() + screen_rect.width() - self.width()
+
+        min_y = screen_rect.y()
+        max_y = screen_rect.y() + screen_rect.height() - self.height()
+
+        x = max(min_x, min(x, max_x))
+        y = max(min_y, min(y, max_y))
+
+        return x, y
+
+    def clamp_position_for_drag(self, x, y, cursor_global_point):
+        """
+        Во время drag выбираем экран по текущей позиции курсора,
+        а затем clamp'им манула целиком внутрь этого экрана.
+
+        Так можно переносить манула между мониторами,
+        но нельзя оставить его "разрезанным" между ними.
+        """
+        screen = self.get_screen_for_point(cursor_global_point)
+        self.bind_to_screen(screen)
+        return self.clamp_position_to_screen(x, y, screen)
+
+    def set_horizontal_edge_anchor(self, edge: str | None):
+        """
+        edge:
+          - None
+          - "left"
+          - "right"
+        """
+        self.horizontal_edge_anchor = edge
+
+    def snap_to_edge_anchor(self):
+        """
+        Пересчитывает X по активному edge-anchor.
+        """
+        if self.horizontal_edge_anchor is None:
+            return
+
+        screen_rect = self.get_current_screen_rect()
+
+        if self.horizontal_edge_anchor == "left":
+            new_x = screen_rect.x()
+        elif self.horizontal_edge_anchor == "right":
+            new_x = screen_rect.x() + screen_rect.width() - self.width()
+        else:
+            return
+
+        self.move(new_x, self.y())
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

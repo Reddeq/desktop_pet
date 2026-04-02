@@ -275,6 +275,8 @@ class PetController(QObject):
         self.hiding_target_x = None
         self.hiding_run_started = False
 
+        self.pet.set_horizontal_edge_anchor(None)
+
         # Если манул был скрыт, показываем обратно
         if not self.pet.isVisible():
             self.pet.show()
@@ -550,7 +552,11 @@ class PetController(QObject):
         new_x = self.pet.x() + delta.x()
         new_y = self.pet.y() + delta.y()
 
-        new_x, new_y = self.pet.clamp_position(new_x, new_y)
+        new_x, new_y = self.pet.clamp_position_for_drag(
+            new_x,
+            new_y,
+            global_pos.toPoint(),
+        )
 
         self.pet.move(new_x, new_y)
         self.ctx.old_pos = global_pos.toPoint()
@@ -837,21 +843,20 @@ class PetController(QObject):
 
         self.ctx.is_hidden_offscreen = False
 
-        screen_rect = self.pet.get_current_screen_rect()
-
-        min_y = screen_rect.y() + 40
-        max_y = max(
-            min_y,
-            screen_rect.y() + screen_rect.height() - self.pet.height() - 20,
-        )
-        y = random.randint(min_y, max_y)
-
-        self.pet.start_hiding_reveal(
-            edge=self.hiding_edge,
-            y=y,
-            node=AnimationNode.HIDING,
+        # Пока окно скрыто:
+        # 1) выставляем правильный edge-anchor
+        # 2) ставим позицию у края
+        # 3) переключаемся в HIDING
+        self.pet.set_horizontal_edge_anchor(self.hiding_edge)
+        self._place_pet_for_hiding_peek()
+        self.pet.force_set_animation_node(
+            AnimationNode.HIDING,
+            hold=True,
         )
 
+        # И только потом показываем окно
+        self.pet.show()
+    
     def _sync_hiding_sequence(self):
         if not self.ctx.is_hiding:
             return
