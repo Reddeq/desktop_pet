@@ -64,7 +64,7 @@ TRANSITIONS: dict[AnimationNode, list[AnimationNode]] = {
     ],
 
     AnimationNode.STARTLED: [
-        AnimationNode.SITTING_IDLE,
+        AnimationNode.STANDING_IDLE,
     ],
 
     AnimationNode.YAWNING: [

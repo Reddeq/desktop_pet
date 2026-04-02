@@ -77,3 +77,11 @@ class PetContext:
     # Если пользователь слишком сильно дёрнул курсор —
     # сопротивление временно ослабевает / отпускает
     swat_cursor_break_distance: int = 120
+    
+    is_scratching_for_food: bool = False
+
+    # Голод ниже этого порога включает begging/food request
+    food_begging_satiety_threshold: float = 50.0
+
+    # На сколько падает toilet/bladder после полного кормления
+    feed_full_meal_bladder_penalty: float = 50.0

@@ -5,6 +5,7 @@ from PyQt6.QtGui import QCursor
 
 from animation_node import AnimationNode
 from pet_state import PetState
+from interaction_mode import InteractionMode
 
 
 class PetCursorAI(QObject):
@@ -85,6 +86,15 @@ class PetCursorAI(QObject):
         if self.ctx.is_post_swat_cautious:
             return self.ctx.post_swat_trigger_chance
         return self.ctx.cursor_chase_trigger_chance
+
+    def _feed_mode_active(self) -> bool:
+        try:
+            return self.pet.cursors.current_mode() == InteractionMode.FEED
+        except Exception:
+            return False
+
+    def _is_hungry_for_feed(self) -> bool:
+        return self.controller.needs.values.satiety < self.ctx.food_begging_satiety_threshold
 
     # -------------------------
     # Cursor motion helpers
@@ -363,6 +373,16 @@ class PetCursorAI(QObject):
 
     def check_cursor_proximity(self):
         cursor_pos = self._update_cursor_motion_state()
+
+        # FEED cursor + голод -> немедленно просим еду вместо swat
+        if self._feed_mode_active() and self._is_hungry_for_feed():
+            if self._cursor_is_near_pet(cursor_pos) and self._cursor_is_reachable_in_y(cursor_pos):
+                if not self.ctx.is_scratching_for_food:
+                    self.controller.start_scratching_for_food()
+                return
+            else:
+                if self.ctx.is_scratching_for_food:
+                    self.controller.finish_scratching_for_food()
 
         # Уже swatting
         if self.ctx.is_swatting_cursor:

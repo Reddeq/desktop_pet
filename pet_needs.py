@@ -168,6 +168,16 @@ class PetNeeds(QObject):
 
         self.needs_changed.emit(self.snapshot())
 
+    def feed_full_meal(self, bladder_penalty: float = 50.0):
+        """
+        Полноценное кормление:
+        - сытость становится 100
+        - bladder уменьшается на фиксированную величину
+        """
+        self.values.satiety = MAX_NEED
+        self.values.bladder = _clamp(self.values.bladder - bladder_penalty)
+        self.needs_changed.emit(self.snapshot())
+
     def apply_swat_cost(self, penalty: Optional[float] = None):
         penalty = self.swat_energy_penalty if penalty is None else penalty
         self.values.energy = _clamp(self.values.energy - penalty)

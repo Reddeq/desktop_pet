@@ -34,6 +34,10 @@ class PetController(QObject):
         self.dig_timer.setSingleShot(True)
         self.dig_timer.timeout.connect(self.finish_notification_investigation)
 
+        self.scratching_timer = QTimer(self)
+        self.scratching_timer.setSingleShot(True)
+        self.scratching_timer.timeout.connect(self.finish_scratching_for_food)
+
         self.needs_timer = QTimer(self)
         self.needs_timer.timeout.connect(self._on_needs_tick)
 
@@ -87,6 +91,7 @@ class PetController(QObject):
         self.dig_timer.stop()
         self.needs_timer.stop()
         self.cursor_ai.stop()
+        self.scratching_timer.stop()
 
     # -------------------------
     # High-level logical state
@@ -152,6 +157,10 @@ class PetController(QObject):
         self.notification_motion_started = False
         self.notification_dig_started = False
 
+    def _stop_scratching_for_food(self):
+        self.ctx.is_scratching_for_food = False
+        self.scratching_timer.stop()
+
     def _stop_sleeping(self):
         self.ctx.is_sleeping = False
 
@@ -163,9 +172,11 @@ class PetController(QObject):
 
         self._stop_cleaning()
         self._stop_notification_investigation()
+        self._stop_scratching_for_food()
         self._stop_sleeping()
 
         self.cursor_ai.cancel()
+        
 
     # -------------------------
     # External needs actions
@@ -176,6 +187,36 @@ class PetController(QObject):
 
     def use_toilet(self):
         self.needs.use_toilet()
+
+    def try_feed(self) -> bool:
+        """
+        Если манул голоден (< 50), кормим:
+        - immediately EATING
+        - satiety = 100
+        - bladder -= 50
+        """
+        if self.ctx.is_sleeping:
+            return False
+
+        if self.needs.values.satiety >= self.ctx.food_begging_satiety_threshold:
+            return False
+
+        self._reset_motion_flags()
+        self.needs.feed_full_meal(
+            bladder_penalty=self.ctx.feed_full_meal_bladder_penalty
+        )
+
+        self._set_logical_state(PetState.IDLE)
+
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.EATING,
+                AnimationNode.SITTING_IDLE,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+        return True
 
     # -------------------------
     # Idle
@@ -291,6 +332,24 @@ class PetController(QObject):
 
     def finish_notification_investigation(self):
         self._stop_notification_investigation()
+        self.start_idle()
+
+    def start_scratching_for_food(self):
+        self._reset_motion_flags()
+        self.ctx.is_scratching_for_food = True
+        self._set_logical_state(PetState.IDLE)
+
+        self.pet.play_node(
+            AnimationNode.SCRATCHING_SCREEN,
+            replace=True,
+            force_restart=True,
+        )
+
+        duration_ms = random.randint(1800, 3500)
+        self.scratching_timer.start(duration_ms)
+
+    def finish_scratching_for_food(self):
+        self.ctx.is_scratching_for_food = False
         self.start_idle()
 
     # -------------------------

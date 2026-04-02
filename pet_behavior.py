@@ -29,6 +29,8 @@ class PetBehavior(QObject):
             or self.ctx.is_investigating_notifications
             or self.ctx.is_chasing_cursor
             or self.ctx.is_swatting_cursor
+            or self.ctx.is_scratching_for_food
+
         )
 
     # -------------------------
@@ -73,17 +75,20 @@ class PetBehavior(QObject):
     # -------------------------
 
     def tick(self):
-        # Во сне не запускаем ничего нового
         if self.ctx.is_sleeping:
             return
 
-        # Если заняты текущим сценарием — тоже ничего нового
         if self.is_busy():
             return
 
-        # Сон инициируется по needs / energy
         if self.controller.needs.is_sleepy(self.ctx.sleep_energy_threshold):
             self.controller.start_sleep()
+            return
+
+        # begging for food if satiety < 50
+        begging_chance = self._food_begging_chance()
+        if begging_chance > 0.0 and random.random() < begging_chance:
+            self.controller.start_scratching_for_food()
             return
 
         actions = [
@@ -107,3 +112,14 @@ class PetBehavior(QObject):
 
         else:
             self.start_idle_scenario()
+
+
+    def _food_begging_chance(self) -> float:
+        satiety = self.controller.needs.values.satiety
+        threshold = self.ctx.food_begging_satiety_threshold
+
+        if satiety >= threshold:
+            return 0.0
+
+        # 50 -> 0.05, 0 -> 0.40
+        return 0.05 + ((threshold - satiety) / threshold) * 0.35

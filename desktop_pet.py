@@ -243,10 +243,17 @@ class FrameAnimatedPet(QWidget):
                         self.controller.on_mouse_press(event.globalPosition())
                         return True
 
-                    if self.cursors.current_mode() == InteractionMode.FEED:
-                        # Логика кормления будет переписана позже под новую систему
-                        event.accept()
-                        return True
+                    if event.type() == QEvent.Type.MouseButtonPress:
+                        if event.button() == Qt.MouseButton.LeftButton:
+                            if self.cursors.current_mode() == InteractionMode.GRAB:
+                                self.setCursor(self.cursors.get_drag_cursor())
+                                self.controller.on_mouse_press(event.globalPosition())
+                                return True
+
+                            if self.cursors.current_mode() == InteractionMode.FEED:
+                                self.controller.try_feed()
+                                event.accept()
+                                return True
 
             if event.type() == QEvent.Type.MouseMove:
                 if event.buttons() == Qt.MouseButton.LeftButton:
@@ -284,6 +291,7 @@ class FrameAnimatedPet(QWidget):
                 return
 
             if self.cursors.current_mode() == InteractionMode.FEED:
+                self.controller.try_feed()
                 event.accept()
                 return
 
