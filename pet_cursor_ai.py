@@ -40,6 +40,10 @@ class PetCursorAI(QObject):
         self._cursor_resist_velocity_x = 0.0
         self._cursor_resist_velocity_y = 0.0
 
+        self._rear_startle_latched = False
+        self._rear_startle_pending_swat = False
+        self._rear_zone_prev = False
+
     # -------------------------
     # Lifecycle
     # -------------------------
@@ -66,7 +70,13 @@ class PetCursorAI(QObject):
         self._cursor_resist_velocity_x = 0.0
         self._cursor_resist_velocity_y = 0.0
 
+        self._rear_startle_latched = False
+        self._rear_startle_pending_swat = False
+        self._rear_zone_prev = False
+
         self._reset_swat_encounter()
+
+        
 
     # -------------------------
     # Encounter helpers
@@ -95,6 +105,67 @@ class PetCursorAI(QObject):
 
     def _is_hungry_for_feed(self) -> bool:
         return self.controller.needs.values.satiety < self.ctx.food_begging_satiety_threshold
+
+    def _cursor_is_behind_pet(self, cursor_pos: QPoint) -> bool:
+        """
+        Курсор считается "сзади", если он находится
+        в задней четверти корпуса, а не просто где угодно
+        по ту сторону центра.
+        """
+        pet_left = self.pet.x()
+        pet_right = self.pet.x() + self.pet.width()
+
+        if not self._cursor_is_reachable_in_y(cursor_pos):
+            return False
+
+        facing_right = self.pet.animation_player.facing_right
+
+        if facing_right:
+            rear_limit_x = pet_left + int(self.pet.width() * 0.25)
+            return cursor_pos.x() <= rear_limit_x
+        else:
+            rear_limit_x = pet_right - int(self.pet.width() * 0.25)
+            return cursor_pos.x() >= rear_limit_x
+
+    def start_rear_startled_swat(self, cursor_pos: QPoint):
+        """
+        Курсор подошёл сзади -> манул пугается, разворачивается и начинает swat.
+        Анимационно запускаем sequence:
+            STARTLED -> SWATTING
+
+        Граф сам подставит промежуточный STANDING_IDLE, если нужно.
+        """
+        self.controller._reset_motion_flags()
+
+        self.ctx.is_chasing_cursor = False
+        self.ctx.is_swatting_cursor = False
+
+        self._rear_startle_pending_swat = True
+        self._rear_startle_latched = True
+
+        # Сразу разворачиваемся к курсору
+        self._face_cursor(cursor_pos)
+
+        # Логически это ближе всего к alert/startled,
+        # а активный swat включим, когда sequence реально дойдёт до SWATTING
+        self.controller._set_logical_state(PetState.ALERT)
+
+        self.pet.play_sequence_nodes(
+            [
+                AnimationNode.STARTLED,
+                AnimationNode.SWATTING,
+            ],
+            replace=True,
+            force_restart=True,
+        )
+
+    def _activate_swat_after_startled(self):
+        """
+        Когда sequence реально дошла до SWATTING,
+        переводим AI в полноценный swat-mode.
+        """
+        self._rear_startle_pending_swat = False
+        self._enter_swat_mode(apply_energy_cost=True)
 
     # -------------------------
     # Cursor motion helpers
@@ -246,14 +317,24 @@ class PetCursorAI(QObject):
     def finish_cursor_chase_cooldown(self):
         self.ctx.cursor_chase_cooldown = False
 
-    def start_cursor_swat(self):
+    def _enter_swat_mode(self, apply_energy_cost: bool = True):
+        """
+        Общий вход в swat-mode:
+        - используется и для обычного swat,
+        - и для swat после startled.
+
+        Здесь должны жить ВСЕ side effects swat,
+        включая удержание курсора.
+        """
         self.ctx.is_chasing_cursor = False
         self.ctx.is_swatting_cursor = True
         self.ctx.is_walking = False
         self.chase_timer.stop()
 
         self.ctx.swat_count_in_encounter += 1
-        self.controller.needs.apply_swat_cost()
+
+        if apply_energy_cost:
+            self.controller.needs.apply_swat_cost()
 
         self.controller._set_logical_state(PetState.SWAT)
 
@@ -266,21 +347,25 @@ class PetCursorAI(QObject):
             force_restart=True,
         )
 
+        self.swat_timer.stop()
         self.swat_timer.start(self.ctx.swat_timeout_ms)
 
-        self._cursor_resist_velocity_x = 0.0
-        self._cursor_resist_velocity_y = 0.0
+        # Если у тебя уже добавлена "вязкость"/сопротивление курсора,
+        # запускаем её здесь — в ОБЩЕМ месте входа в swat.
+        if hasattr(self, "cursor_resist_timer"):
+            self._cursor_resist_velocity_x = 0.0
+            self._cursor_resist_velocity_y = 0.0
 
-        if self.ctx.swat_cursor_resist_enabled:
-            self.cursor_resist_timer.start(self.ctx.swat_cursor_resist_interval_ms)
+            if getattr(self.ctx, "swat_cursor_resist_enabled", False):
+                self.cursor_resist_timer.start(self.ctx.swat_cursor_resist_interval_ms)
+
+    def start_cursor_swat(self):
+        self._enter_swat_mode(apply_energy_cost=True)
 
     def finish_cursor_swat(self, resume_chase=False):
         self.ctx.is_swatting_cursor = False
         self.swat_timer.stop()
-        self.cursor_resist_timer.stop()
-
-        self._cursor_resist_velocity_x = 0.0
-        self._cursor_resist_velocity_y = 0.0
+        self._rear_startle_pending_swat = False
 
         if resume_chase:
             self.start_cursor_chase()
@@ -373,6 +458,44 @@ class PetCursorAI(QObject):
 
     def check_cursor_proximity(self):
         cursor_pos = self._update_cursor_motion_state()
+
+        rear_zone_now = (
+            self._cursor_is_near_pet(cursor_pos)
+            and self._cursor_is_behind_pet(cursor_pos)
+        )
+        rear_zone_entered = rear_zone_now and not self._rear_zone_prev
+        self._rear_zone_prev = rear_zone_now
+
+        # Сбрасываем latch, когда курсор ушёл от манула
+        if not self._cursor_is_near_pet(cursor_pos):
+            self._rear_startle_latched = False
+
+        # Если startled -> swatting sequence уже в процессе,
+        # ждём, когда реально дошли до SWATTING
+        if self._rear_startle_pending_swat:
+            if self.pet.current_animation_node() == AnimationNode.SWATTING:
+                self._activate_swat_after_startled()
+            return
+
+        # IMPORTANT:
+        # startled срабатывает ТОЛЬКО если манул в sitting_idle
+        # и курсор именно ВОШЁЛ в заднюю зону.
+        if (
+            self.pet.current_animation_node() == AnimationNode.SITTING_IDLE
+            and not self.ctx.is_chasing_cursor
+            and not self.ctx.is_swatting_cursor
+            and not self.ctx.is_falling
+            and not self.ctx.is_walking
+            and not self.ctx.is_dragging
+            and not self.ctx.is_recovering
+            and not self.ctx.is_cleaning
+            and not self.ctx.is_sleeping
+            and not self.ctx.is_investigating_notifications
+            and not self.ctx.cursor_chase_cooldown
+        ):
+            if rear_zone_entered and not self._rear_startle_latched:
+                self.start_rear_startled_swat(cursor_pos)
+                return
 
         # FEED cursor + голод -> немедленно просим еду вместо swat
         if self._feed_mode_active() and self._is_hungry_for_feed():
