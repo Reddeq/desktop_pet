@@ -771,23 +771,31 @@ class PetController(QObject):
 
     def _place_pet_for_hiding_peek(self):
         """
-        Ставит манула частично за край экрана, как будто он выглядывает.
+        Ставит манула у самого края экрана, полностью внутри видимой области.
+
+        "Половинчатость" теперь делается самой hiding-анимацией,
+        а не выносом окна за границу монитора.
         """
         screen_rect = self.pet.get_current_screen_rect()
 
         min_y = screen_rect.y() + 40
-        max_y = max(min_y, self.pet.ground_y - self.pet.height() - 20)
+        max_y = max(
+            min_y,
+            screen_rect.y() + screen_rect.height() - self.pet.height() - 20,
+        )
         y = random.randint(min_y, max_y)
 
         if self.hiding_edge == "left":
-            # normal orientation on left edge
+            # На левом краю — обычная ориентация
             self.pet.set_facing_right(True)
-            x = screen_rect.x() - int(self.pet.width() * 0.60)
+            x = screen_rect.x()
         else:
-            # mirrored orientation on right edge
+            # На правом краю — зеркальная ориентация
             self.pet.set_facing_right(False)
-            x = screen_rect.x() + screen_rect.width() - int(self.pet.width() * 0.40)
+            x = screen_rect.x() + screen_rect.width() - self.pet.width()
 
+        # На всякий случай ещё раз clamp'им позицию
+        x, y = self.pet.clamp_position(x, y)
         self.pet.move(x, y)
 
     def start_hiding_sequence(self):
