@@ -21,6 +21,8 @@ class PetContext:
     is_post_pooping_zoomies: bool = False
     is_hiding: bool = False
     is_hidden_offscreen: bool = False
+    is_menu_open: bool = False
+    is_menu_forced_meowing: bool = False
 
     # ~раз в 5 минут при logic tick 5 сек => примерно 1 / 60
     hiding_trigger_chance: float = 1.0 / 60.0

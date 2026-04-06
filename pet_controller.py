@@ -221,6 +221,21 @@ class PetController(QObject):
             self.finish_eating()
             return
 
+        if finished_node == AnimationNode.MEOWING:
+            # Если меню всё ещё открыто — запускаем meowing заново
+            if self.ctx.is_menu_open and self.ctx.is_menu_forced_meowing:
+                self.pet.play_node(
+                    AnimationNode.MEOWING,
+                    replace=True,
+                    force_restart=True,
+                )
+                return
+
+            # Обычный meowing-сценарий (не menu-forced)
+            if self.ctx.is_meowing:
+                self.finish_meowing()
+                return
+
     # -------------------------
     # Internal state cleanup
     # -------------------------
@@ -240,6 +255,10 @@ class PetController(QObject):
     def _stop_meowing(self):
         self.ctx.is_meowing = False
         self.meowing_timer.stop()
+
+    def _stop_menu_meowing(self):
+        self.ctx.is_menu_open = False
+        self.ctx.is_menu_forced_meowing = False
 
     def _stop_eating(self):
         self.ctx.is_eating = False
@@ -290,6 +309,7 @@ class PetController(QObject):
         self._stop_cleaning()
         self._stop_notification_investigation()
         self._stop_meowing()
+        self._stop_menu_meowing()
         self._stop_scratching_for_food()
         self._stop_eating()
         self._stop_sleeping()
@@ -876,3 +896,37 @@ class PetController(QObject):
         """
         print("[debug] starting hiding sequence")
         self.start_hiding_sequence()
+
+    def start_menu_meowing(self):
+        """
+        Пока меню открыто, манул принудительно находится в meowing.
+        """
+        if self.ctx.is_menu_open and self.ctx.is_menu_forced_meowing:
+            return
+
+        self._reset_motion_flags()
+
+        self.ctx.is_menu_open = True
+        self.ctx.is_menu_forced_meowing = True
+        self.ctx.is_meowing = True
+
+        self._set_logical_state(PetState.IDLE)
+
+        self.pet.play_node(
+            AnimationNode.MEOWING,
+            replace=True,
+            force_restart=True,
+        )
+
+    def finish_menu_meowing(self):
+        """
+        Вызывается при закрытии меню.
+        """
+        if not self.ctx.is_menu_open and not self.ctx.is_menu_forced_meowing:
+            return
+
+        self.ctx.is_menu_open = False
+        self.ctx.is_menu_forced_meowing = False
+        self.ctx.is_meowing = False
+
+        self.start_idle()

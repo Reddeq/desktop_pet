@@ -34,6 +34,8 @@ class PetBehavior(QObject):
             or self.ctx.is_pooping
             or self.ctx.is_post_pooping_zoomies
             or self.ctx.is_hiding
+            or self.ctx.is_menu_open
+            or self.ctx.is_menu_forced_meowing
 
         )
 

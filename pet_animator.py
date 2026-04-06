@@ -125,6 +125,25 @@ class PetAnimator(QObject):
                 self.expanded_queue.extend(expanded)
             return
 
+        # SPECIAL CASE:
+        # если просят force_restart того же самого единственного узла,
+        # не строим путь по графу (он будет пустой), а просто заново проигрываем клип
+        if (
+            force_restart
+            and len(target_sequence) == 1
+            and self.current_node == target_sequence[0]
+        ):
+            node = target_sequence[0]
+            meta = NODE_META[node]
+
+            self.current_node = node
+            self.current_step = AnimationStep(
+                node=node,
+                hold=(meta.loop or meta.requires_motion),
+            )
+            self._play_node(node, force=True)
+            return
+
         if (
             not force_restart
             and len(target_sequence) == 1
