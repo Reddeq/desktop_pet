@@ -42,19 +42,19 @@ class PetQuickMenu(QWidget):
         style = QApplication.style()
 
         self.exit_button = self._make_square_button(
-            text="Выход",
+            text="Exit",
             icon=style.standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton),
             callback=self._on_exit,
         )
 
         self.info_button = self._make_square_button(
-            text="О приложении",
+            text="About",
             icon=style.standardIcon(QStyle.StandardPixmap.SP_MessageBoxInformation),
             callback=self._on_about,
         )
 
         self.help_button = self._make_square_button(
-            text="Помощь",
+            text="Help",
             icon=style.standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton),
             callback=self._on_help,
         )
@@ -163,30 +163,24 @@ class PetQuickMenu(QWidget):
     def _on_about(self):
         QMessageBox.information(
             self.pet_widget,
-            "О приложении",
+            "About",
             (
-                "Desktop Pet — это манул-питомец на рабочем столе.\n\n"
-                "Сейчас в проекте есть:\n"
-                "• поведение по состояниям и нуждам\n"
-                "• реакции на курсор\n"
-                "• режим кормления\n"
-                "• hiding / pooping / scratching / meowing\n"
-                "• drag / falling / recovery\n"
+                "Made by Reddeq\n"
+                "Art by Greengh0st\n\n"
+                "Special thanks to:\n"
+                "Kamila Nicholls\n"
+                "Arey\n"
             ),
         )
 
     def _on_help(self):
         QMessageBox.information(
             self.pet_widget,
-            "Помощь",
+            "Help",
             (
-                "Управление:\n\n"
-                "• ПКМ — открыть меню\n"
-                "• Колесо мыши над манулом — смена режима курсора\n"
-                "• GRAB — перетаскивание манула\n"
-                "• FEED — кормление, если манул голоден\n\n"
-                "Подсказка:\n"
-                "Если запускаешь приложение из терминала, доступны debug-команды."
+                "Controls:\n\n"
+                "• Scroll Mouse Wheel — change interaction mode\n"
+                "• FEED me with meat!\n\n"
             ),
         )
     def hideEvent(self, event):
