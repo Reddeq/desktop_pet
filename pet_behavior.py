@@ -27,7 +27,8 @@ class PetBehavior(QObject):
             or self.ctx.is_cleaning
             or self.ctx.is_sleeping
             or self.ctx.is_investigating_notifications
-            or self.ctx.is_chasing_cursor
+            or self.ctx.is_hunting_cursor
+            or self.ctx.is_waiting_to_swat
             or self.ctx.is_swatting_cursor
             or self.ctx.is_scratching_for_food
             or self.ctx.is_eating

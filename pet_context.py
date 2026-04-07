@@ -69,6 +69,29 @@ class PetContext:
     old_pos: Optional[QPoint] = None
 
     # -------------------------
+    # Cursor hunting / swat logic
+    # -------------------------
+    is_hunting_cursor: bool = False
+    is_waiting_to_swat: bool = False
+
+    cursor_check_interval_ms: int = 120
+    cursor_stationary_ms: int = 0
+
+    # Курсор вообще считается "интересным" для hunting,
+    # если он в этой зоне по расстоянию
+    cursor_hunting_distance: int = 220
+
+    # Через сколько неподвижности начинается hunting
+    cursor_hunt_start_after_ms: int = 10_000
+
+    # Скорость hunting
+    cursor_hunting_speed: int = 4
+
+    # Задержка перед swat
+    swat_prepare_delay_min_ms: int = 2000
+    swat_prepare_delay_max_ms: int = 3000
+
+    # -------------------------
     # Game-like cursor resistance during swat
     # -------------------------
     swat_cursor_resist_enabled: bool = True
