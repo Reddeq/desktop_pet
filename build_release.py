@@ -1,4 +1,4 @@
-﻿import shutil
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -75,6 +75,7 @@ def main():
         "--clean",
         "--icon", ICON_FILE,
         "--add-data", ASSETS_ARG,
+        "--collect-submodules", "pet_scenarios",
         ENTRY_SCRIPT,
     ]
     subprocess.run(cmd, check=True)

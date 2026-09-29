@@ -1,46 +1,49 @@
-﻿import random
+import random
 
-from PyQt6.QtCore import QObject, QTimer, QPoint
+from PyQt6.QtCore import QTimer, QPoint
 from PyQt6.QtGui import QCursor
 
 from pet_state import PetState
+from pet_scenarios import BehaviorScenario
 
 
-class PetCursorAI(QObject):
-    def __init__(self, controller, pet, ctx, parent=None):
-        super().__init__(parent)
-        self.controller = controller
-        self.pet = pet
-        self.ctx = ctx
+class PetCursorAI(BehaviorScenario):
+    name = "cursor"
 
-        self.cursor_check_timer = QTimer(self)
+    def __init__(self, controller):
+        super().__init__(controller)
+
+        self.cursor_check_timer = QTimer(controller)
         self.cursor_check_timer.timeout.connect(self.check_cursor_proximity)
 
-        self.chase_timer = QTimer(self)
+        self.chase_timer = QTimer(controller)
         self.chase_timer.setSingleShot(True)
         self.chase_timer.timeout.connect(self.finish_cursor_chase)
 
-        self.cursor_chase_cooldown_timer = QTimer(self)
+        self.cursor_chase_cooldown_timer = QTimer(controller)
         self.cursor_chase_cooldown_timer.setSingleShot(True)
         self.cursor_chase_cooldown_timer.timeout.connect(self.finish_cursor_chase_cooldown)
 
-        self.swat_timer = QTimer(self)
+        self.swat_timer = QTimer(controller)
         self.swat_timer.setSingleShot(True)
         self.swat_timer.timeout.connect(self.finish_cursor_swat_due_to_timeout)
 
-        self.post_swat_caution_timer = QTimer(self)
+        self.post_swat_caution_timer = QTimer(controller)
         self.post_swat_caution_timer.setSingleShot(True)
         self.post_swat_caution_timer.timeout.connect(self.finish_post_swat_caution)
 
-    def start(self):
+    def activate(self):
         self.cursor_check_timer.start(120)
 
-    def stop(self):
+    def deactivate(self):
         self.cursor_check_timer.stop()
         self.chase_timer.stop()
         self.cursor_chase_cooldown_timer.stop()
         self.swat_timer.stop()
         self.post_swat_caution_timer.stop()
+
+    def is_busy(self):
+        return self.ctx.is_chasing_cursor or self.ctx.is_swatting_cursor
 
     def cancel(self):
         self.ctx.is_chasing_cursor = False
@@ -276,16 +279,7 @@ class PetCursorAI(QObject):
         if not self._cursor_is_near_pet(cursor_pos):
             self._reset_swat_encounter()
 
-        if (
-            self.ctx.is_falling
-            or self.ctx.is_walking
-            or self.ctx.is_dragging
-            or self.ctx.is_recovering
-            or self.ctx.is_cleaning
-            or self.ctx.is_sleeping
-            or self.ctx.is_investigating_notifications
-            or self.ctx.cursor_chase_cooldown
-        ):
+        if self.controller.behavior.is_busy() or self.ctx.cursor_chase_cooldown:
             return
 
         if self._cursor_is_near_pet(cursor_pos) and self._cursor_is_reachable_in_y(cursor_pos):

@@ -1,4 +1,4 @@
-﻿from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject
 
 from pet_state import PetState
 
@@ -62,9 +62,8 @@ class PetMotion(QObject):
         if new_x == self.ctx.walk_target_x:
             self.ctx.is_walking = False
 
-            if self.ctx.is_investigating_notifications:
-                self.controller.start_dig()
-            else:
+            self.controller.behavior.on_walk_finished()
+            if not self.controller.behavior.is_busy():
                 self.pet.set_state(PetState.IDLE)
 
     def _land(self):

@@ -1,4 +1,4 @@
-﻿from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject
 
 from animation_clip import AnimationClip
 from pet_state import PetState
@@ -45,7 +45,7 @@ class PetAnimator(QObject):
                 self._play_clip(AnimationClip.SLEEP_EXIT, force=True)
             return
 
-        clip = self.direct_clip_map.get(state)
+        clip = self.direct_clip_map.get(state, state)
         if clip is not None:
             self._play_clip(clip, force=force)
 
@@ -63,7 +63,7 @@ class PetAnimator(QObject):
             target_state = self.queued_state_after_exit or PetState.IDLE
             self.queued_state_after_exit = None
 
-            clip = self.direct_clip_map.get(target_state)
+            clip = self.direct_clip_map.get(target_state, target_state)
             if clip is not None:
                 self._play_clip(clip, force=True)
             return
@@ -75,6 +75,7 @@ class PetAnimator(QObject):
         self.queued_state_after_exit = None
         self._play_clip(AnimationClip.SLEEP_ENTER, force=True)
 
-    def _play_clip(self, clip: AnimationClip, force: bool = False):
+    def _play_clip(self, clip: AnimationClip | str, force: bool = False):
         self.current_clip = clip
-        self.animation_player.set_animation(clip.value, force=force)
+        name = clip.value if isinstance(clip, AnimationClip) else clip
+        self.animation_player.set_animation(name, force=force)

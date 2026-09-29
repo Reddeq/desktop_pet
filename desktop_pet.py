@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QWidget, QLabel
@@ -127,7 +127,7 @@ class FrameAnimatedPet(QWidget):
         return x, y
 
 
-    def set_state(self, new_state: PetState, force=False):
+    def set_state(self, new_state: PetState | str, force=False):
         if force or self.current_state != new_state:
             self.current_state = new_state
             self.animator.request_state(new_state, force=force)
