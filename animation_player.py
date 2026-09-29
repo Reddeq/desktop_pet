@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
