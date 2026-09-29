@@ -1,4 +1,4 @@
-﻿import os
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
@@ -124,21 +124,7 @@ class AnimationPlayer(QObject):
             if pixmap.isNull():
                 continue
 
-            if animation_name in {
-                "idle",
-                "walk",
-                "falling",
-                "falling_recovery",
-                "cleaning",
-                "alert",
-                "run",
-                "dig",
-                "swat",
-                "sleep",
-                "sleep_enter",
-                "sleep_loop",
-                "sleep_exit",
-            } and not self.facing_right:
+            if not self.facing_right:
                 pixmap = pixmap.transformed(
                     QTransform().scale(-1, 1),
                     Qt.TransformationMode.SmoothTransformation,

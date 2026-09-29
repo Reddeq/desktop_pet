@@ -1,56 +1,67 @@
-﻿import random
+"""Automatic scenario discovery and scheduling."""
+import importlib
+import pkgutil
+import random
+import pet_scenarios
+from pet_scenarios import BehaviorScenario
 
-from PyQt6.QtCore import QObject
 
-from pet_state import PetState
+def load_scenarios(controller):
+    scenarios = []
+    for info in pkgutil.iter_modules(pet_scenarios.__path__):
+        if info.name.startswith("_"):
+            continue
+        module = importlib.import_module(f"pet_scenarios.{info.name}")
+        scenarios.extend(value(controller) for value in vars(module).values()
+                         if isinstance(value, type) and issubclass(value, BehaviorScenario)
+                         and value is not BehaviorScenario and value.__module__ == module.__name__)
+    return scenarios
 
 
-class PetBehavior(QObject):
-    def __init__(self, controller, pet, ctx, motion, parent=None):
-        super().__init__(parent)
+class PetBehavior:
+    def __init__(self, controller):
         self.controller = controller
-        self.pet = pet
-        self.ctx = ctx
-        self.motion = motion
+        self.scenarios = load_scenarios(controller)
+        self.by_name = {s.name: s for s in self.scenarios}
+        if len(self.by_name) != len(self.scenarios) or not all(self.by_name):
+            raise ValueError("Scenario names must be unique and nonempty")
 
-    def is_busy(self) -> bool:
-        return (
-            self.ctx.is_falling
-            or self.ctx.is_walking
-            or self.ctx.is_dragging
-            or self.ctx.is_recovering
-            or self.ctx.is_cleaning
-            or self.ctx.is_sleeping
-            or self.ctx.is_investigating_notifications
-            or self.ctx.is_chasing_cursor
-            or self.ctx.is_swatting_cursor
-        )
+    def start(self):
+        for scenario in self.scenarios:
+            scenario.activate()
+
+    def stop(self):
+        for scenario in self.scenarios:
+            scenario.deactivate()
+
+    def cancel(self):
+        for scenario in self.scenarios:
+            scenario.cancel()
+
+    def is_busy(self):
+        ctx = self.controller.ctx
+        return (ctx.is_falling or ctx.is_walking or ctx.is_dragging or ctx.is_recovering
+                or any(s.is_busy() for s in self.scenarios))
 
     def tick(self):
-        if self.ctx.is_sleeping:
-            return
-
         if self.is_busy():
             return
+        for scenario in self.scenarios:
+            if scenario.priority and scenario.can_start():
+                scenario.start()
+                return
+        available = [s for s in self.scenarios if s.weight > 0 and s.can_start()]
+        if available:
+            random.choices(available, weights=[s.weight for s in available])[0].start()
 
-        if self.controller.needs.is_sleepy(self.ctx.sleep_energy_threshold):
-            self.controller.start_sleep()
-            return
+    def on_animation_finished(self, animation_name):
+        for scenario in self.scenarios:
+            scenario.on_animation_finished(animation_name)
 
-        actions = ["idle", "walk", "cleaning", "investigate_notifications"]
-        weights = [0.45, 0.25, 0.20, 0.10]
-        new_action = random.choices(actions, weights=weights)[0]
+    def on_needs_tick(self):
+        for scenario in self.scenarios:
+            scenario.on_needs_tick()
 
-        if new_action == "walk":
-            direction = random.choice([-1, 1])
-            distance = random.randint(60, 180)
-            self.motion.start_walk(direction, distance)
-
-        elif new_action == "cleaning":
-            self.controller.start_cleaning()
-
-        elif new_action == "investigate_notifications":
-            self.controller.start_notification_investigation()
-
-        else:
-            self.pet.set_state(PetState.IDLE)
+    def on_walk_finished(self):
+        for scenario in self.scenarios:
+            scenario.on_walk_finished()

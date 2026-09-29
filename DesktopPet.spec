@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
 
 
 a = Analysis(
@@ -6,7 +7,7 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('assets', 'assets')],
-    hiddenimports=[],
+    hiddenimports=collect_submodules('pet_scenarios'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
