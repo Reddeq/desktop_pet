@@ -40,6 +40,10 @@ class PetCursorAI(QObject):
         self._rear_startle_pending_swat = False
         self._rear_zone_prev = False
 
+        # Если True, текущий startled->swat НЕ удерживает курсор
+        # и просто заканчивается по swat_timer.
+        self._limited_startled_swat_active = False
+
     # -------------------------
     # Lifecycle
     # -------------------------
@@ -69,8 +73,13 @@ class PetCursorAI(QObject):
         self._rear_startle_latched = False
         self._rear_startle_pending_swat = False
         self._rear_zone_prev = False
+        self._limited_startled_swat_active = False
 
         self._reset_swat_encounter()
+
+    def is_busy(self):
+        return (self.ctx.is_hunting_cursor or self.ctx.is_waiting_to_swat
+                or self.ctx.is_swatting_cursor or self._rear_startle_pending_swat)
 
     # -------------------------
     # State helpers
@@ -78,6 +87,29 @@ class PetCursorAI(QObject):
 
     def _reset_swat_encounter(self):
         self.ctx.swat_count_in_encounter = 0
+
+    def _stop_cursor_play(self, go_idle: bool = True):
+        """
+        Полностью сбрасывает hunting / waiting / обычный swatting.
+        Limited startled-swat сюда не должен попадать.
+        """
+        self.ctx.is_hunting_cursor = False
+        self.ctx.is_waiting_to_swat = False
+        self.ctx.is_swatting_cursor = False
+
+        self.swat_timer.stop()
+        self.swat_prepare_timer.stop()
+        self.cursor_resist_timer.stop()
+
+        self._cursor_resist_velocity_x = 0.0
+        self._cursor_resist_velocity_y = 0.0
+
+        self._rear_startle_pending_swat = False
+        self._limited_startled_swat_active = False
+        self._reset_swat_encounter()
+
+        if go_idle:
+            self.controller.start_idle()
 
     def _start_post_swat_caution(self):
         self.ctx.is_post_swat_cautious = True
@@ -97,6 +129,16 @@ class PetCursorAI(QObject):
             self.controller.needs.values.satiety
             < self.ctx.food_begging_satiety_threshold
         )
+
+    def _cursor_play_enabled(self) -> bool:
+        """
+        Обычные cursor-play interactions разрешены только если mood <= 50.
+        Если mood > 50:
+        - hunting не запускается
+        - обычный swat не запускается
+        - но startled->swat остаётся возможным.
+        """
+        return self.controller.needs.values.mood <= 50.0
 
     # -------------------------
     # Cursor motion / geometry helpers
@@ -143,7 +185,7 @@ class PetCursorAI(QObject):
     def _cursor_is_near_pet(self, cursor_pos: QPoint) -> bool:
         """
         Локальная near-зона только для startled / feed / близких реакций.
-        Для hunting больше не используется.
+        Для hunting не используется.
         """
         pet_center_x = self.pet.x() + self.pet.width() // 2
         pet_center_y = self.pet.y() + self.pet.height() // 2
@@ -160,10 +202,9 @@ class PetCursorAI(QObject):
     def _cursor_is_reachable_in_y_strict(self, cursor_pos: QPoint) -> bool:
         """
         Строгая зона досягаемости по высоте:
-        используется для hunting, startled и входа в waiting_to_swat.
-
-        Считаем от ground_y, а не от pet.y(), чтобы смена анимации
-        меньше ломала расчёт.
+        - hunting
+        - startled
+        - вход в waiting_to_swat
         """
         foot_y = self.pet.ground_y + self.pet.height()
         min_y = self.pet.ground_y + int(self.pet.height() * 0.15)
@@ -173,7 +214,8 @@ class PetCursorAI(QObject):
     def _cursor_is_reachable_in_y_relaxed(self, cursor_pos: QPoint) -> bool:
         """
         Более мягкая зона по высоте:
-        используется для удержания waiting_to_swat / swatting.
+        - удержание waiting_to_swat
+        - удержание swatting
         """
         foot_y = self.pet.ground_y + self.pet.height()
         min_y = self.pet.ground_y + int(self.pet.height() * 0.05)
@@ -278,7 +320,15 @@ class PetCursorAI(QObject):
 
     def _activate_swat_after_startled(self):
         self._rear_startle_pending_swat = False
-        self._enter_swat_mode(apply_energy_cost=True)
+
+        # Если настроение хорошее, startled->swat остаётся,
+        # но swat НЕ удерживает курсор и просто заканчивается по таймеру.
+        sticky = self._cursor_play_enabled()
+
+        self._enter_swat_mode(
+            apply_energy_cost=True,
+            sticky_cursor=sticky,
+        )
 
     # -------------------------
     # Hunting / waiting / swat
@@ -309,6 +359,8 @@ class PetCursorAI(QObject):
     def start_waiting_to_swat(self):
         if self.ctx.is_waiting_to_swat or self.ctx.is_swatting_cursor:
             return
+
+        self.controller._reset_motion_flags()
 
         self.ctx.is_hunting_cursor = False
         self.ctx.is_waiting_to_swat = True
@@ -346,7 +398,11 @@ class PetCursorAI(QObject):
         else:
             self.cancel_waiting_to_swat(go_idle=True)
 
-    def _enter_swat_mode(self, apply_energy_cost: bool = True):
+    def _enter_swat_mode(self, apply_energy_cost: bool = True, sticky_cursor: bool = True):
+        """
+        sticky_cursor=True  -> обычный swat: удерживаем курсор
+        sticky_cursor=False -> limited startled-swat: не удерживаем, ждём таймер завершения
+        """
         self.ctx.is_hunting_cursor = False
         self.ctx.is_waiting_to_swat = False
         self.ctx.is_swatting_cursor = True
@@ -378,19 +434,27 @@ class PetCursorAI(QObject):
         self._cursor_resist_velocity_x = 0.0
         self._cursor_resist_velocity_y = 0.0
 
-        if getattr(self.ctx, "swat_cursor_resist_enabled", False):
+        self._limited_startled_swat_active = not sticky_cursor
+
+        if sticky_cursor and getattr(self.ctx, "swat_cursor_resist_enabled", False):
             self.cursor_resist_timer.start(
                 self.ctx.swat_cursor_resist_interval_ms
             )
+        else:
+            self.cursor_resist_timer.stop()
 
     def start_cursor_swat(self):
-        self._enter_swat_mode(apply_energy_cost=True)
+        self._enter_swat_mode(
+            apply_energy_cost=True,
+            sticky_cursor=True,
+        )
 
     def finish_cursor_swat(self, go_idle=True):
         self.ctx.is_swatting_cursor = False
         self.swat_timer.stop()
         self.cursor_resist_timer.stop()
         self._rear_startle_pending_swat = False
+        self._limited_startled_swat_active = False
 
         self._cursor_resist_velocity_x = 0.0
         self._cursor_resist_velocity_y = 0.0
@@ -420,6 +484,9 @@ class PetCursorAI(QObject):
 
     def apply_swat_cursor_resistance(self):
         if not self.ctx.is_swatting_cursor:
+            return
+
+        if self._limited_startled_swat_active:
             return
 
         cursor_pos = QCursor.pos()
@@ -486,22 +553,20 @@ class PetCursorAI(QObject):
             self._rear_startle_latched = False
 
         # Жёсткие блокировки
-        if (
-            self.ctx.is_falling
-            or self.ctx.is_dragging
-            or self.ctx.is_recovering
-            or self.ctx.is_cleaning
-            or self.ctx.is_sleeping
-            or self.ctx.is_meowing
-            or self.ctx.is_menu_open
-            or self.ctx.is_menu_forced_meowing
-            or self.ctx.is_eating
-            or self.ctx.is_pooping
-            or self.ctx.is_post_pooping_zoomies
-            or self.ctx.is_hiding
-            or self.ctx.is_investigating_notifications
-        ):
+        if self.controller.interaction_locked or self.controller.behaviors.blocks_cursor:
             return
+
+        # Если обычные cursor-play interactions запрещены из-за mood > 50,
+        # сбрасываем hunting / waiting / обычный swat.
+        # Но limited startled-swat не трогаем — он должен сам закончиться по таймеру.
+        cursor_play_disabled = not self._cursor_play_enabled()
+        if cursor_play_disabled:
+            if (
+                self.ctx.is_hunting_cursor
+                or self.ctx.is_waiting_to_swat
+                or (self.ctx.is_swatting_cursor and not self._limited_startled_swat_active)
+            ):
+                self._stop_cursor_play(go_idle=True)
 
         # startled -> swatting chain уже в процессе
         if self._rear_startle_pending_swat:
@@ -510,6 +575,7 @@ class PetCursorAI(QObject):
             return
 
         # startled только из sitting_idle и только при входе сзади
+        # startled работает даже при mood > 50
         if (
             self.pet.current_animation_node() == AnimationNode.SITTING_IDLE
             and not self.ctx.is_hunting_cursor
@@ -533,8 +599,20 @@ class PetCursorAI(QObject):
                 if self.ctx.is_scratching_for_food:
                     self.controller.finish_scratching_for_food()
 
+        if self.ctx.is_scratching_for_food:
+            return
+
+        # Если mood > 50, дальше обычную hunting/swat-логику не выполняем.
+        # Limited startled-swat при этом может продолжать жить до тайм-аута.
+        if cursor_play_disabled:
+            return
+
         # Уже swatting
         if self.ctx.is_swatting_cursor:
+            # Limited startled-swat не удерживает курсор вообще
+            if self._limited_startled_swat_active:
+                return
+
             if self._should_hold_swat_without_moving(cursor_pos):
                 self._face_cursor(cursor_pos)
 
@@ -601,23 +679,27 @@ class PetCursorAI(QObject):
         Имя оставлено ради совместимости с controller,
         но внутри теперь hunting / waiting / swat pipeline.
         """
-        if self.ctx.is_menu_open or self.ctx.is_menu_forced_meowing:
+        if self.controller.interaction_locked or self.controller.behaviors.blocks_cursor:
             return False
 
-        if self.ctx.is_hiding:
-            return False
-
-        if self.ctx.is_pooping or self.ctx.is_post_pooping_zoomies:
-            return False
-
-        if self.ctx.is_eating:
-            return False
+        # Если mood > 50, обычный hunting/waiting/swat выключены.
+        # Limited startled-swat может при этом жить независимо.
+        if not self._cursor_play_enabled():
+            if (
+                self.ctx.is_hunting_cursor
+                or self.ctx.is_waiting_to_swat
+                or (self.ctx.is_swatting_cursor and not self._limited_startled_swat_active)
+            ):
+                self._stop_cursor_play(go_idle=True)
 
         if self.ctx.is_swatting_cursor:
             return True
 
         if self.ctx.is_waiting_to_swat:
             return True
+
+        if not self._cursor_play_enabled():
+            return False
 
         if self.ctx.is_hunting_cursor and not self.ctx.is_dragging:
             cursor_pos = QCursor.pos()

@@ -14,6 +14,8 @@ class DebugConsole(QObject):
         self._stop_event = threading.Event()
         self._thread = None
 
+        self._last_logged_state_name = None
+
         self.command_received.connect(self.handle_command)
 
     def start(self):
@@ -62,7 +64,39 @@ class DebugConsole(QObject):
 
             self.command_received.emit(line)
 
-    @pyqtSlot(str)
+    # -------------------------
+    # Formatting / logging
+    # -------------------------
+
+    def _format_state_line(self, state_name: str) -> str:
+        needs = self.controller.needs.values
+        return (
+            f"{state_name} | "
+            f"satiety {needs.satiety:.0f} | "
+            f"energy {needs.energy:.0f} | "
+            f"mood {needs.mood:.0f} | "
+            f"bladder {needs.bladder:.0f}"
+        )
+
+    def log_state_change(self, state_name: str):
+        """
+        Печатает строку только если это действительно новое состояние.
+        """
+        if state_name == self._last_logged_state_name:
+            return
+
+        self._last_logged_state_name = state_name
+        print(self._format_state_line(state_name))
+
+    def print_current_state(self):
+        node = self.controller.pet.current_animation_node()
+        state_name = node.value if node is not None else "unknown"
+        print(self._format_state_line(state_name))
+
+    # -------------------------
+    # Commands
+    # -------------------------
+
     @pyqtSlot(str)
     def handle_command(self, line: str):
         parts = line.split()
@@ -76,7 +110,20 @@ class DebugConsole(QObject):
             return
 
         if cmd == "show":
-            self.controller.debug_print_needs()
+            self.print_current_state()
+            return
+
+        if cmd == "behaviors":
+            print("[debug] behaviors: " + ", ".join(sorted(self.controller.behaviors.registry)))
+            for error in self.controller.behaviors.errors:
+                print(f"[debug] behavior error: {error}")
+            return
+
+        if cmd == "run":
+            if len(parts) != 2:
+                print("[debug] usage: run <behavior_id>")
+            elif not self.controller.start_behavior(parts[1]):
+                print("[debug] behavior unavailable or interaction is locked")
             return
 
         if cmd in {"hide", "hiding"}:
@@ -96,10 +143,10 @@ class DebugConsole(QObject):
 
             ok = self.controller.set_need_value(cmd, value)
             if not ok:
-                print(f"[debug] unknown need: {cmd}")
+                print(f"[debug] invalid need or non-finite value: {cmd}")
                 return
 
-            self.controller.debug_print_needs()
+            self.print_current_state()
             return
 
         print(f"[debug] unknown command: {cmd}")
@@ -115,4 +162,6 @@ class DebugConsole(QObject):
         print("  hide              # force hiding scenario")
         print("  hiding            # alias for hide")
         print("  show")
+        print("  behaviors         # list automatically discovered scripts")
+        print("  run <behavior_id> # start any registered behavior")
         print("  help")

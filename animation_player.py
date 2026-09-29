@@ -52,11 +52,11 @@ class AnimationPlayer(QObject):
         if self.facing_right != value:
             self.facing_right = value
             if self.current_animation is not None:
-                self.set_animation(
-                    self.current_animation,
-                    loop=self.current_loop,
-                    force=True,
-                )
+                # Turning must not restart a one-shot clip (or its finish event).
+                self.frames = self._load_frames(self.current_animation)
+                if self.frames:
+                    self.current_frame_index = min(self.current_frame_index, len(self.frames) - 1)
+                    self.frame_changed.emit(self.frames[self.current_frame_index])
 
     # -------------------------
     # Playback API

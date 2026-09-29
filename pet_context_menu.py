@@ -116,6 +116,7 @@ class PetQuickMenu(QWidget):
             if hasattr(self.pet_widget, "controller"):
                 self.pet_widget.controller.start_menu_meowing()
 
+
         self.adjustSize()
 
         screen = QApplication.screenAt(global_pos)

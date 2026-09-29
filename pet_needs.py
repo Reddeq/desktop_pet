@@ -1,5 +1,6 @@
 ﻿from dataclasses import dataclass, asdict
 from typing import Optional
+import math
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -100,7 +101,7 @@ class PetNeeds(QObject):
 
         sleeping = (
             current_animation_node in self.sleep_animation_nodes
-            or logical_state == PetState.SLEEP
+            or (current_animation_node is None and logical_state == PetState.SLEEP)
         )
 
         # -------------------------
@@ -242,7 +243,13 @@ class PetNeeds(QObject):
         if key is None:
             return False
 
-        setattr(self.values, key, _clamp(float(value)))
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value):
+            return False
+        setattr(self.values, key, _clamp(value))
         self.needs_changed.emit(self.snapshot())
         return True
 

@@ -11,8 +11,6 @@ except Exception:
 
 
 PROJECT_NAME = "DesktopPet"
-ENTRY_SCRIPT = "desktop_pet.py"
-ASSETS_ARG = "assets:assets"
 
 ICON_SCRIPT = "make_icon.py"
 ICON_FILE = "assets/icon.ico"
@@ -36,7 +34,7 @@ def run_make_icon(root: Path):
         raise FileNotFoundError(f"Не найден скрипт генерации иконки: {icon_script_path}")
 
     print("[1/4] Генерация icon.ico...")
-    subprocess.run([sys.executable, str(icon_script_path)], check=True)
+    subprocess.run([sys.executable, str(icon_script_path)], check=True, cwd=root)
 
     if not icon_file_path.exists():
         raise RuntimeError(f"После make_icon.py не найден файл иконки: {icon_file_path}")
@@ -47,7 +45,6 @@ def main():
     dist_dir = root / "dist"
     build_dir = root / "build"
     release_dir = root / "release"
-    spec_file = root / f"{PROJECT_NAME}.spec"
     app_dir = dist_dir / PROJECT_NAME
 
     versioned_zip = release_dir / f"{PROJECT_NAME}-v{__version__}-win64.zip"
@@ -61,23 +58,16 @@ def main():
     if app_dir.exists():
         shutil.rmtree(app_dir, ignore_errors=True)
 
-    if spec_file.exists():
-        spec_file.unlink()
-
     release_dir.mkdir(parents=True, exist_ok=True)
 
     print("[2/4] Сборка приложения через PyInstaller...")
     cmd = [
-        "pyinstaller",
-        "-D",
-        "-w",
-        "-n", PROJECT_NAME,
+        sys.executable, "-m", "PyInstaller",
         "--clean",
-        "--icon", ICON_FILE,
-        "--add-data", ASSETS_ARG,
-        ENTRY_SCRIPT,
+        "--noconfirm",
+        f"{PROJECT_NAME}.spec",
     ]
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, cwd=root)
 
     if not app_dir.exists():
         raise RuntimeError(f"Не найдена папка сборки: {app_dir}")

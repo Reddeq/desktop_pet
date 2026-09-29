@@ -81,6 +81,9 @@ class FrameAnimatedPet(QWidget):
         self.debug_console = DebugConsole(self.controller, self)
         self.debug_console.start()
 
+        QApplication.instance().aboutToQuit.connect(self.controller.stop)
+        QApplication.instance().aboutToQuit.connect(self.debug_console.stop)
+
         # Стартовое логическое состояние — пока оставляем для старых модулей
         self.current_state = PetState.IDLE
 
@@ -161,6 +164,13 @@ class FrameAnimatedPet(QWidget):
     # -------------------------
     # Animation / state hooks
     # -------------------------
+
+    def on_animation_node_changed(self, node: AnimationNode):
+        """
+        Вызывается каждый раз, когда PetAnimator реально включает новый animation node.
+        """
+        if hasattr(self, "debug_console") and self.debug_console is not None:
+            self.debug_console.log_state_change(node.value)
 
     def on_frame_changed(self, pixmap):
         if self._position_initialized:
@@ -292,21 +302,14 @@ class FrameAnimatedPet(QWidget):
                         self.controller.on_mouse_press(event.globalPosition())
                         return True
 
-                    if event.type() == QEvent.Type.MouseButtonPress:
-                        if event.button() == Qt.MouseButton.LeftButton:
-                            if self.cursors.current_mode() == InteractionMode.GRAB:
-                                self.setCursor(self.cursors.get_drag_cursor())
-                                self.controller.on_mouse_press(event.globalPosition())
-                                return True
-
-                            if self.cursors.current_mode() == InteractionMode.FEED:
-                                self.controller.try_feed()
-                                event.accept()
-                                return True
+                    if self.cursors.current_mode() == InteractionMode.FEED:
+                        self.controller.try_feed()
+                        event.accept()
+                        return True
 
             if event.type() == QEvent.Type.MouseMove:
                 if event.buttons() == Qt.MouseButton.LeftButton:
-                    if self.cursors.current_mode() == InteractionMode.GRAB:
+                    if self.controller.ctx.is_dragging:
                         self.controller.on_mouse_move(event.globalPosition())
                         return True
 
@@ -316,7 +319,7 @@ class FrameAnimatedPet(QWidget):
 
             if event.type() == QEvent.Type.MouseButtonRelease:
                 if event.button() == Qt.MouseButton.LeftButton:
-                    if self.cursors.current_mode() == InteractionMode.GRAB:
+                    if self.controller.ctx.is_dragging:
                         self.controller.on_mouse_release()
                         self.cursors.apply_to_widget(self)
                         return True
@@ -348,7 +351,7 @@ class FrameAnimatedPet(QWidget):
 
     def mouseMoveEvent(self, event):
         if event.buttons() == Qt.MouseButton.LeftButton:
-            if self.cursors.current_mode() == InteractionMode.GRAB:
+            if self.controller.ctx.is_dragging:
                 self.controller.on_mouse_move(event.globalPosition())
                 return
 
@@ -359,8 +362,8 @@ class FrameAnimatedPet(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-       if event.button() == Qt.MouseButton.LeftButton:
-            if self.cursors.current_mode() == InteractionMode.GRAB:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.controller.ctx.is_dragging:
                 self.controller.on_mouse_release()
                 self.cursors.apply_to_widget(self)
                 return
@@ -370,7 +373,7 @@ class FrameAnimatedPet(QWidget):
                 self.cursors.apply_to_widget(self)
                 return
 
-       super().mouseReleaseEvent(event)
+        super().mouseReleaseEvent(event)
 
     # -------------------------
     # Context menu
@@ -378,12 +381,6 @@ class FrameAnimatedPet(QWidget):
 
     def contextMenuEvent(self, event):
         self.context_menu.show(event.globalPos())
-
-    def get_screen_for_point(self, global_point):
-        screen = QGuiApplication.screenAt(global_point)
-        if screen is None:
-            screen = QGuiApplication.primaryScreen()
-        return screen
 
     def clamp_position_to_screen(self, x, y, screen):
         screen_rect = screen.availableGeometry()

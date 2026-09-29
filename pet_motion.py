@@ -1,6 +1,7 @@
 ﻿from PyQt6.QtCore import QObject
 
 from animation_node import AnimationNode
+from pet_state import PetState
 
 
 class PetMotion(QObject):
@@ -138,6 +139,7 @@ class PetMotion(QObject):
 
     def start_fall_recovery(self):
         self.ctx.is_recovering = True
+        self.controller._set_logical_state(PetState.FALLING_RECOVERY)
 
         if hasattr(self.pet, "resolve_animation_interrupt"):
             self.pet.resolve_animation_interrupt()
@@ -146,3 +148,4 @@ class PetMotion(QObject):
 
     def finish_fall_recovery(self):
         self.ctx.is_recovering = False
+        self.controller._set_logical_state(PetState.IDLE)

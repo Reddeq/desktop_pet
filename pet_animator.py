@@ -1,8 +1,9 @@
 ﻿from collections import deque
 from dataclasses import dataclass
 from typing import Optional
+import logging
 
-from PyQt6.QtCore import QObject, QTimer
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from animation_graph import NODE_META, TRANSITIONS, find_path
 from animation_node import AnimationNode
@@ -17,6 +18,7 @@ class AnimationStep:
 
 class PetAnimator(QObject):
     """
+
     Graph-driven аниматор.
 
     Отвечает за:
@@ -26,6 +28,8 @@ class PetAnimator(QObject):
     - interrupt / recovery;
     - переключение следующего шага по animation_finished / motion_complete.
     """
+
+    animation_failed = pyqtSignal(str)
 
     def __init__(self, pet, animation_player, parent=None):
         super().__init__(parent)
@@ -107,63 +111,41 @@ class PetAnimator(QObject):
         if not target_sequence:
             return
 
-        if replace:
-            self.expanded_queue.clear()
-            self.bridge_timer.stop()
-
+        # Append paths start at the tail, not at the currently playing node.
         start = self.current_node
+        if not replace and self.expanded_queue:
+            start = self.expanded_queue[-1].node
 
         if start is None:
             first = target_sequence[0]
-            first_hold = len(target_sequence) == 1
-            self.current_node = first
-            self.current_step = AnimationStep(node=first, hold=first_hold)
-            self._play_node(first, force=True)
+            expanded = [AnimationStep(first, hold=len(target_sequence) == 1)]
+            expanded.extend(self._expand_targets(first, target_sequence[1:]))
+        else:
+            expanded = self._expand_targets(start, target_sequence)
 
-            if len(target_sequence) > 1:
-                expanded = self._expand_targets(first, target_sequence[1:])
-                self.expanded_queue.extend(expanded)
+        if replace:
+            self.expanded_queue.clear()
+            self.bridge_timer.stop()
+            self.is_interrupt_active = False
+            self.interrupt_node = None
+            self.interrupt_recovery_targets = []
+        elif self.expanded_queue:
+            self.expanded_queue[-1].hold = False
+
+        # Re-requesting the current pose without force keeps its playback position.
+        if (replace and not force_restart and self.current_step is not None
+                and expanded and expanded[0].node == self.current_node):
+            self.current_step.hold = expanded.pop(0).hold
+            self.expanded_queue.extend(expanded)
+            self._arm_bridge()
             return
 
-        # SPECIAL CASE:
-        # если просят force_restart того же самого единственного узла,
-        # не строим путь по графу (он будет пустой), а просто заново проигрываем клип
-        if (
-            force_restart
-            and len(target_sequence) == 1
-            and self.current_node == target_sequence[0]
-        ):
-            node = target_sequence[0]
-            meta = NODE_META[node]
-
-            self.current_node = node
-            self.current_step = AnimationStep(
-                node=node,
-                hold=(meta.loop or meta.requires_motion),
-            )
-            self._play_node(node, force=True)
-            return
-
-        if (
-            not force_restart
-            and len(target_sequence) == 1
-            and self.current_node == target_sequence[0]
-            and not self.is_interrupt_active
-        ):
-            return
-
-        expanded = self._expand_targets(start, target_sequence)
         self.expanded_queue.extend(expanded)
-
-        if self.current_step is None:
+        if self.current_step is not None and self.expanded_queue:
+            self.current_step.hold = False
+        if self.current_step is None or (replace and force_restart):
             self._advance_queue()
-            return
-
-        if force_restart:
-            self._advance_queue()
-            return
-
-        if not self._is_currently_blocking_progress():
+        elif not self._is_currently_blocking_progress():
             self._advance_queue()
 
     def interrupt_with(
@@ -226,11 +208,12 @@ class PetAnimator(QObject):
             return
 
         if not meta.loop:
+            finished_step = self.current_step
             self._advance_queue()
 
             # Если очередь была пуста и новый шаг не стартовал,
             # освобождаем current_step.
-            if self.current_step is not None and self.current_step.node == finished_node:
+            if self.current_step is finished_step:
                 self.current_step = None
 
     def notify_motion_complete(self):
@@ -248,6 +231,9 @@ class PetAnimator(QObject):
         self.expanded_queue.clear()
         self.bridge_timer.stop()
         self.current_step = None
+        self.is_interrupt_active = False
+        self.interrupt_node = None
+        self.interrupt_recovery_targets = []
 
     # -------------------------
     # Internal queue building
@@ -267,7 +253,8 @@ class PetAnimator(QObject):
             if path is None:
                 raise ValueError(f"No path from {cursor.value} to {target.value}")
 
-            segment_nodes = path[1:]
+            # An explicit same-node target is a real step, including motion nodes.
+            segment_nodes = path[1:] if len(path) > 1 else [target]
             is_last_target = (target_index == total_targets - 1)
 
             for i, node in enumerate(segment_nodes):
@@ -293,26 +280,38 @@ class PetAnimator(QObject):
         if not self.expanded_queue:
             return
 
+        self.bridge_timer.stop()
         next_step = self.expanded_queue.popleft()
         self.current_step = next_step
         self.current_node = next_step.node
 
         self._play_node(next_step.node, force=True)
 
-        meta = NODE_META[next_step.node]
+        self._arm_bridge()
 
-        # Если loop-узел используется как промежуточная "мостовая" поза,
-        # продвигаем очередь коротким таймером.
-        if meta.loop and not meta.requires_motion and not next_step.hold:
+    def _arm_bridge(self):
+        self.bridge_timer.stop()
+        if self.current_step is None:
+            return
+        meta = NODE_META[self.current_step.node]
+        if meta.loop and not meta.requires_motion and not self.current_step.hold:
             self.bridge_timer.start(self.bridge_hold_ms)
 
     def _play_node(self, node: AnimationNode, force: bool = False):
         meta = NODE_META[node]
-        self.animation_player.set_animation(
+        loaded = self.animation_player.set_animation(
             node.value,
             loop=meta.loop,
             force=force,
         )
+        if not loaded:
+            logging.getLogger(__name__).error("Animation has no readable frames: %s", node.value)
+            self.clear()
+            self.animation_failed.emit(node.value)
+            return
+
+        if hasattr(self.pet, "on_animation_node_changed"):
+            self.pet.on_animation_node_changed(node)
 
     def _on_bridge_timeout(self):
         if self.current_step is None:
@@ -352,8 +351,7 @@ class PetAnimator(QObject):
         - hiding reveal после исчезновения за край экрана
         - других телепортирующихся / вне-графовых состояний
         """
-        self.expanded_queue.clear()
-        self.bridge_timer.stop()
+        self.clear()
 
         self.current_node = node
         self.current_step = AnimationStep(node=node, hold=hold)
