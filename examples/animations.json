@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "clips": {
+    "sit_idle": {
+      "directory": "pixel/idle",
+      "pixel_art": true,
+      "scale": 3,
+      "frame_ms": 100
+    },
+    "walk": {
+      "sheet": "pixel/walk.png",
+      "frame_size": [32, 32],
+      "count": 4,
+      "pixel_art": true,
+      "scale": 3,
+      "durations_ms": [80, 80, 100, 80]
+    }
+  }
+}

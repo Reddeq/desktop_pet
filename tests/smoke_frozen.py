@@ -26,10 +26,28 @@ class Behavior(Scenario):
         return float(event == "logic")
 
     def on_start(self):
+        console = self.pet.debug_console
+        console_hidden = console.window is None
+        console.open()
+        console.window.input.setText("run sl")
+        console.window.input.setCursorPosition(4)
+        console.log_state_change("smoke_state")
+        console_input_preserved = (console.window.input.text() == "run sl"
+                                   and console.window.input.cursorPosition() == 4)
+        console.window.input.setText("show")
+        console.window.input.returnPressed.emit()
+        console_command_works = (console.window.input.text() == ""
+                                 and "> show" in console.window.output.toPlainText())
+        console.window.close()
         Path(os.environ["PET_SMOKE_RESULT"]).write_text(json.dumps({
+            "console_hidden": console_hidden,
+            "console_input_preserved": console_input_preserved,
+            "console_command_works": console_command_works,
             "ids": sorted(self.manager.registry),
             "errors": self.manager.errors,
             "frames_loaded": self.pet.animation_player.has_frames(),
+            "scheduled": sorted(self.manager.schedule_snapshot()),
+            "has_needs": hasattr(self.controller, "needs"),
         }))
         self.later(1, QApplication.instance().quit)
 '''
@@ -37,6 +55,10 @@ class Behavior(Scenario):
 
 def main():
     executable = Path(sys.argv[1]).resolve(strict=True)
+    binary = executable.read_bytes()
+    pe_offset = int.from_bytes(binary[0x3c:0x40], 'little')
+    subsystem = int.from_bytes(binary[pe_offset + 92:pe_offset + 94], 'little')
+    assert subsystem == 2, 'EXE must use Windows GUI subsystem (no startup console)'
     plugins = executable.parent / "behavior_plugins"
     plugins.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory() as directory:
@@ -55,11 +77,15 @@ def main():
             data = json.loads(result_path.read_text())
             assert not data["errors"], data
             assert data["frames_loaded"], data
+            assert all(data[key] for key in ("console_hidden", "console_input_preserved",
+                                            "console_command_works")), data
+            assert data["scheduled"] == ["beg_food", "hide", "poop", "sandbath", "sharpen_claws", "sleep"], data
+            assert not data["has_needs"], data
             assert set(data["ids"]) == {
-                "idle", "walk", "cleaning", "sleep", "meowing", "eating", "food_begging",
-                "notifications", "hiding", "toilet", "zoomies", "menu_meowing", "smoke_frozen_probe",
+                "idle", "walk", "clean", "sleep", "meow", "eat", "beg_food", "enter",
+                "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath", "smoke_frozen_probe",
             }, data
-            print("Frozen EXE: 12 built-ins + one external script discovered and executed; assets loaded; clean exit.")
+            print("Frozen EXE: 15 built-ins + one external script discovered and executed; assets loaded; clean exit.")
         finally:
             Path(script.name).unlink()
 

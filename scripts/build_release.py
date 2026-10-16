@@ -1,0 +1,106 @@
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+from version import __version__
+
+
+PROJECT_NAME = "DesktopPet"
+
+ICON_SCRIPT = "scripts/make_icon.py"
+ICON_FILE = "assets/icon.ico"
+
+
+def zip_directory_contents(source_dir: Path, zip_path: Path):
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for path in source_dir.rglob("*"):
+            if path.is_file():
+                arcname = path.relative_to(source_dir)
+                zf.write(path, arcname)
+
+
+def run_make_icon(root: Path):
+    icon_script_path = root / ICON_SCRIPT
+    icon_file_path = root / ICON_FILE
+
+    if not icon_script_path.exists():
+        raise FileNotFoundError(f"Не найден скрипт генерации иконки: {icon_script_path}")
+
+    print("[1/4] Генерация icon.ico...")
+    subprocess.run([sys.executable, str(icon_script_path)], check=True, cwd=root)
+
+    if not icon_file_path.exists():
+        raise RuntimeError(f"После make_icon.py не найден файл иконки: {icon_file_path}")
+
+
+def main():
+    root = ROOT
+    dist_dir = root / "dist"
+    build_dir = root / "build"
+    release_dir = root / "release"
+    app_dir = dist_dir / PROJECT_NAME
+
+    # A run Windows EXE locks its files. Check BEFORE clearing its folder;
+    # build alongside it instead of leaving the run installation incomplete.
+    executable = app_dir / f"{PROJECT_NAME}.exe"
+    if executable.exists():
+        try:
+            with executable.open("r+b"):
+                pass
+        except PermissionError:
+            dist_dir = Path(tempfile.mkdtemp(prefix="updated-", dir=dist_dir))
+            app_dir = dist_dir / PROJECT_NAME
+            print(f"Running build is locked; new output: {app_dir}")
+
+    versioned_zip = release_dir / f"{PROJECT_NAME}-v{__version__}-win64.zip"
+    stable_zip = release_dir / f"{PROJECT_NAME}-win64.zip"
+
+    run_make_icon(root)
+
+    if build_dir.exists():
+        shutil.rmtree(build_dir, ignore_errors=True)
+
+    if app_dir.exists():
+        shutil.rmtree(app_dir, ignore_errors=True)
+
+    release_dir.mkdir(parents=True, exist_ok=True)
+
+    print("[2/4] Сборка приложения через PyInstaller...")
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        "--clean",
+        "--noconfirm",
+        "--distpath", str(dist_dir),
+        str(root / "packaging" / f"{PROJECT_NAME}.spec"),
+    ]
+    subprocess.run(cmd, check=True, cwd=root)
+
+    if not app_dir.exists():
+        raise RuntimeError(f"Не найдена папка сборки: {app_dir}")
+
+    print("[3/4] Создание versioned ZIP...")
+    if versioned_zip.exists():
+        versioned_zip.unlink()
+    zip_directory_contents(app_dir, versioned_zip)
+
+    print("[4/4] Создание stable ZIP для updater...")
+    if stable_zip.exists():
+        stable_zip.unlink()
+    shutil.copy2(versioned_zip, stable_zip)
+
+    print()
+    print("Готово.")
+    print(f"Приложение: {app_dir / (PROJECT_NAME + '.exe')}")
+    print(f"Версионный архив: {versioned_zip}")
+    print(f"Стабильный архив: {stable_zip}")
+
+
+if __name__ == "__main__":
+    main()

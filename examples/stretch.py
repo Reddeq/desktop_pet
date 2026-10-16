@@ -8,13 +8,13 @@ class Behavior(Scenario):
 
     @classmethod
     def weight(cls, controller):
-        return 0.08 if controller.needs.values.energy > 40 else 0.0
+        return 0.08
 
     def on_start(self):
         self.started = False
-        self.play(AnimationNode.STANDING_IDLE)
+        self.play(AnimationNode.STAND_IDLE)
 
     def on_tick(self):
-        if not self.started and self.pet.current_animation_node() == AnimationNode.STANDING_IDLE:
+        if not self.started and self.pet.current_animation_node() == AnimationNode.STAND_IDLE:
             self.started = True
             self.later(1500, self.finish)
