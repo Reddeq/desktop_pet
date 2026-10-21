@@ -137,6 +137,10 @@ class PetCursorAI(QObject):
         except Exception:
             return False
 
+    def wants_food(self, cursor_pos):
+        return (self._feed_mode_active() and self.controller.can_feed()
+                and self._cursor_is_near_pet(cursor_pos))
+
     # -------------------------
     # Cursor motion / geometry helpers
     # -------------------------
@@ -606,17 +610,28 @@ class PetCursorAI(QObject):
             self._rear_startle_latched = False
 
         # Жёсткие блокировки
-        if self.controller.interaction_locked or self.controller.behaviors.blocks_cursor:
+        if self.controller.interaction_locked:
+            return
+
+        active = self.controller.behaviors.active
+        # A nearby food cursor starts a persistent request. An existing request
+        # monitors its own exit conditions and must not restart every AI tick.
+        if self._feed_mode_active():
+            if self.controller.behaviors.blocks_cursor and active.id != 'beg_food':
+                return
+            if self.wants_food(cursor_pos):
+                self.controller.start_behavior('food_beg')
+                return
+            if self.jump.active:
+                return
+            if self.is_busy():
+                self._stop_cursor_play(go_idle=True)
+            return
+
+        if self.controller.behaviors.blocks_cursor:
             return
 
         if self.jump.on_cooldown or self.ctx.is_post_swat_cautious:
-            return
-
-        # The food cursor is a direct interaction; autonomous requests use
-        # their own schedule and shouldn't restart on every proximity check.
-        if self._feed_mode_active():
-            if self.is_busy():
-                self._stop_cursor_play(go_idle=True)
             return
 
         if self.jump.active:

@@ -23,6 +23,8 @@ def zip_directory_contents(source_dir: Path, zip_path: Path):
         for path in source_dir.rglob("*"):
             if path.is_file():
                 arcname = path.relative_to(source_dir)
+                if "behavior_plugins" in arcname.parts:
+                    continue
                 zf.write(path, arcname)
 
 

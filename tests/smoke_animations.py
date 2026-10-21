@@ -79,7 +79,7 @@ def main():
             pet.controller.process_walk_step()
         assert any(0 < width < pet.width() for width in widths)
         assert pet._screen_clip is None
-        assert pet.mask().isEmpty()
+        assert pet.label.clip_rect is None
         assert pet.isVisible() and pet.y() == pet.ground_y
         pet.move(pet.x(), pet.ground_y - 150)
         pet.controller.on_mouse_press(QPointF(pet.x(), pet.y()))
@@ -125,7 +125,7 @@ def main():
             if manager.active is None:
                 break
         assert manager.active is None
-        assert pet.mask().isEmpty()
+        assert pet.label.clip_rect is None
         assert not pet.controller.cursor_ai.cursor_resist_timer.isActive()
         assert manager.start('sandbath')
         scenario = manager.active
@@ -148,6 +148,28 @@ def main():
         assert pet.current_animation_node() == N.END_SCRATCH_SCREEN
         wait_until(lambda: pet.current_animation_node() == N.SIT_IDLE,
                    "scratch exit and sit down")
+        ai = pet.controller.cursor_ai
+        food_position = QPoint(pet.x() + pet.width() // 2, pet.y() + pet.height() // 2)
+        with patch.object(ai, '_feed_mode_active', return_value=True) as mode, patch(
+            'pet_cursor_ai.QCursor.pos', return_value=food_position
+        ):
+            ai.check_cursor_proximity()
+            scenario = manager.active
+            assert scenario.id == 'food_beg'
+            wait_until(lambda: pet.current_animation_node() == N.SCRATCH_SCREEN, 'food beg entry')
+            food_loops = []
+            def record_food_loop(node):
+                if node == N.SCRATCH_SCREEN.value:
+                    food_loops.append(node)
+            pet.animation_player.animation_loop_finished.connect(record_food_loop)
+            wait_until(lambda: len(food_loops) >= 2, 'persistent food beg loops')
+            pet.animation_player.animation_loop_finished.disconnect(record_food_loop)
+            ai.check_cursor_proximity()
+            assert manager.active is scenario and not scenario._timers
+            mode.return_value = False
+            pet.controller.process_walk_step()
+            assert manager.active is None
+        wait_until(lambda: pet.current_animation_node() == N.SIT_IDLE, 'food beg exit')
         assert manager.start("sleep")
         scenario = manager.active
         wait_until(lambda: pet.current_animation_node() == N.SLEEP, "sleep entry")

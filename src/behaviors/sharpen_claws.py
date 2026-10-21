@@ -15,12 +15,14 @@ class Behavior(Scenario):
         self.finish_pending = False
         self.play(N.RUN, PetState.RUN)
         screen = self.pet.get_current_screen_rect()
-        # Place the extended front paw at the edge, not the transparent canvas.
-        paw_ratio = 86.5 / 112
+        # The shared 112px canvas reaches x=89 (exclusive) across all three
+        # phases. A point inside the paw (x=86.5) cuts off its extended tip.
+        # Keep the full silhouette visible, with one scaled pixel of padding.
+        reach_ratio = 89 / 112
         if self.edge == 'right':
-            target = round(screen.right() - 3 - self.pet.width() * paw_ratio)
+            target = round(screen.right() + 1 - 3 - self.pet.width() * reach_ratio)
         else:
-            target = round(screen.left() + 3 - self.pet.width() * (1 - paw_ratio))
+            target = round(screen.left() + 3 - self.pet.width() * (1 - reach_ratio))
         self.motion.start_run_to_x(target, allow_partial=True)
 
     def on_tick(self):

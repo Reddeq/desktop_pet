@@ -151,10 +151,13 @@ class PetController(QObject):
         else:
             self.motion.start_fall_recovery()
 
-    def try_feed(self):
-        if (self.interaction_locked or self.ctx.is_sleep
+    def can_feed(self):
+        return not (self.interaction_locked or self.ctx.is_sleep
                 or self.ctx.is_eat or self.ctx.is_hide or self.cursor_ai.jump.active
-                or self.behaviors._clock() < self.food_cooldown_until):
+                or self.behaviors._clock() < self.food_cooldown_until)
+
+    def try_feed(self):
+        if not self.can_feed():
             return False
         if not self.start_behavior("eat"):
             return False

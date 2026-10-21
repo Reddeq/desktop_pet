@@ -1,25 +1,17 @@
-DESKTOP PET
+PIXLER - DESKTOP PALLAS'S CAT
 
 
-РАЗРАБОТКА
+DEVELOPMENT
 
 Reddeq
 
 
-ПИКСЕЛЬНАЯ ГРАФИКА И АНИМАЦИИ
+PIXEL ART AND ANIMATIONS
 
 Greengh0st
 
 
-ОСОБАЯ БЛАГОДАРНОСТЬ
+SPECIAL THANKS
 
 Kamila Nicholls
 Arey
-
-
-ТЕХНОЛОГИИ И ИНСТРУМЕНТЫ
-
-Python — язык и среда выполнения.
-PyQt6 / Qt — окна, интерфейс и отображение анимаций.
-PyInstaller — сборка приложения для Windows.
-Pillow — подготовка и импорт кадров анимации.

@@ -1,9 +1,9 @@
 import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication, QWidget, QLabel, QMessageBox
-from PyQt6.QtGui import QGuiApplication, QIcon, QRegion
-from PyQt6.QtCore import Qt, QEvent, QRect
+from PyQt6.QtWidgets import QApplication, QWidget, QMessageBox
+from PyQt6.QtGui import QGuiApplication, QIcon
+from PyQt6.QtCore import Qt, QEvent
 
 from animation_node import AnimationNode
 from animation_player import AnimationPlayer
@@ -15,6 +15,7 @@ from pet_context_menu import PetContextMenuManager
 from pet_controller import PetController
 from pet_state import PetState
 from debug_console import DebugConsole
+from sprite_label import SpriteLabel
 
 
 def get_resource_base_dir():
@@ -52,7 +53,7 @@ class FrameAnimatedPet(QWidget):
         self.cursors = InteractionCursorManager(self.base_dir)
         self.context_menu = PetContextMenuManager(self)
 
-        self.label = QLabel(self)
+        self.label = SpriteLabel(self)
         self.label.installEventFilter(self)
 
         if self.icon_path.exists():
@@ -248,11 +249,10 @@ class FrameAnimatedPet(QWidget):
 
     def _update_screen_clip(self):
         if self._screen_clip is None:
-            self.clearMask()
+            self.label.set_clip_rect(None)
             return
-        visible = self.geometry().intersected(self._screen_clip).translated(-self.x(), -self.y())
-        # An empty QRegion clears the mask, so use an off-widget pixel instead.
-        self.setMask(QRegion(visible if not visible.isEmpty() else QRect(-1, -1, 1, 1)))
+        visible = self._screen_clip.translated(-self.x(), -self.y()).intersected(self.rect())
+        self.label.set_clip_rect(visible)
 
     def moveEvent(self, event):
         super().moveEvent(event)

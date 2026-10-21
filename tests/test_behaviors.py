@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from PyQt6.QtCore import QPointF, QRect, QTimer
+from PyQt6.QtCore import QPoint, QPointF, QRect, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
@@ -30,6 +30,7 @@ class FakePlayer:
 
     def set_animation(self, name, loop, force=False):
         self.current_animation = name
+        self.current_loop = loop
         return True
 
 
@@ -228,7 +229,7 @@ class BehaviorTests(unittest.TestCase):
     def test_all_builtins_discovered(self):
         self.assertEqual(set(self.manager.registry), {
             "idle", "walk", "clean", "sleep", "meow", "eat", "enter",
-            "beg_food", "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath",
+            "beg_food", "food_beg", "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath",
         })
         self.assertFalse(self.manager.errors)
 
@@ -425,15 +426,101 @@ class BehaviorTests(unittest.TestCase):
                 other.stop()
                 other.deleteLater()
 
-    def test_feed_cursor_suppresses_hunt_without_restarting_food_requests(self):
+    def test_distant_feed_cursor_suppresses_hunt_without_starting_food_requests(self):
         ai = self.controller.cursor_ai
         with patch.object(ai, "_feed_mode_active", return_value=True), patch.object(
             ai, "start_cursor_hunt"
-        ) as hunt:
+        ) as hunt, patch('pet_cursor_ai.QCursor.pos', return_value=QPoint(-1000, -1000)):
             for _ in range(3):
                 ai.check_cursor_proximity()
             hunt.assert_not_called()
         self.assertIsNone(self.manager.active)
+
+    def test_nearby_food_cursor_keeps_request_looping_without_timer_or_restart(self):
+        ai = self.controller.cursor_ai
+        with patch.object(ai, '_feed_mode_active', return_value=True), patch(
+            'pet_cursor_ai.QCursor.pos', return_value=QPoint(450, 550)
+        ):
+            ai.check_cursor_proximity()
+            scenario = self.manager.active
+            self.assertEqual(scenario.id, 'food_beg')
+            self.reach(N.SCRATCH_SCREEN)
+            self.assertTrue(self.pet.animation_player.current_loop)
+            self.manager._clock = lambda: 100_000
+            for _ in range(10):
+                ai.check_cursor_proximity()
+                self.controller.process_walk_step()
+                self.controller.on_animation_loop_finished(N.SCRATCH_SCREEN.value)
+                self.manager.logic_tick()
+                self.assertIs(self.manager.active, scenario)
+            self.assertFalse(scenario._timers)
+            self.assertFalse(self.controller.ctx.is_hunt_cursor)
+
+    def test_food_beg_ends_when_mode_changes_cursor_leaves_or_cooldown_starts(self):
+        ai = self.controller.cursor_ai
+        for reason in ('mode', 'distance', 'cooldown'):
+            with self.subTest(reason=reason), patch.object(
+                ai, '_feed_mode_active', return_value=True
+            ) as mode, patch('pet_cursor_ai.QCursor.pos', return_value=QPoint(450, 550)) as cursor:
+                self.controller.food_cooldown_until = 0
+                ai.check_cursor_proximity()
+                self.assertEqual(self.manager.active.id, 'food_beg')
+                self.reach(N.SCRATCH_SCREEN)
+                if reason == 'mode':
+                    mode.return_value = False
+                elif reason == 'distance':
+                    cursor.return_value = QPoint(-1000, -1000)
+                else:
+                    self.controller.food_cooldown_until = self.manager._clock() + 60
+                self.controller.process_walk_step()
+                self.assertIsNone(self.manager.active)
+                self.assertFalse(self.controller.ctx.is_scratch_for_food)
+                self.reach(N.SIT_IDLE)
+
+    def test_food_beg_obeys_food_cooldown_and_ignores_post_swat_caution(self):
+        ai = self.controller.cursor_ai
+        self.manager._clock = lambda: 100
+        self.controller.food_cooldown_until = 160
+        self.controller.ctx.is_post_swat_cautious = True
+        with patch.object(ai, '_feed_mode_active', return_value=True), patch(
+            'pet_cursor_ai.QCursor.pos', return_value=QPoint(450, 550)
+        ):
+            ai.check_cursor_proximity()
+            self.assertIsNone(self.manager.active)
+            self.manager._clock = lambda: 160
+            ai.check_cursor_proximity()
+            self.assertEqual(self.manager.active.id, 'food_beg')
+
+    def test_feeding_replaces_food_beg_and_proximity_does_not_interrupt_eating(self):
+        ai = self.controller.cursor_ai
+        with patch.object(ai, '_feed_mode_active', return_value=True), patch(
+            'pet_cursor_ai.QCursor.pos', return_value=QPoint(450, 550)
+        ):
+            ai.check_cursor_proximity()
+            scenario = self.manager.active
+            self.reach(N.SCRATCH_SCREEN)
+            self.assertTrue(self.controller.try_feed())
+            self.assertEqual(self.manager.active.id, 'eat')
+            self.assertFalse(self.controller.ctx.is_scratch_for_food)
+            scenario.on_tick()  # A stale tick cannot finish the replacement.
+            ai.check_cursor_proximity()
+            self.assertEqual(self.manager.active.id, 'eat')
+            self.assertFalse(self.controller.try_feed())
+
+    def test_food_cursor_does_not_interrupt_hidden_sleeping_or_physical_scenarios(self):
+        ai = self.controller.cursor_ai
+        with patch.object(ai, '_feed_mode_active', return_value=True), patch(
+            'pet_cursor_ai.QCursor.pos', return_value=QPoint(450, 550)
+        ):
+            for behavior in ('sleep', 'hide', 'enter', 'clean'):
+                self.manager.start(behavior)
+                scenario = self.manager.active
+                ai.check_cursor_proximity()
+                self.assertIs(self.manager.active, scenario)
+            self.controller.on_mouse_press(QPointF(450, 550))
+            ai.check_cursor_proximity()
+            self.assertTrue(self.controller.ctx.is_drag)
+            self.assertIsNone(self.manager.active)
 
     def test_menu_defers_due_poop(self):
         self.controller.start_menu_meow()
