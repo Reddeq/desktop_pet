@@ -7,6 +7,7 @@ from pet_state import PetState
 
 class Behavior(Scenario):
     id = "hide"
+    requires_desktop = True
     flags = ("is_hide", "is_hidden_offscreen")
     priority = 80
     preserve_on_menu = True

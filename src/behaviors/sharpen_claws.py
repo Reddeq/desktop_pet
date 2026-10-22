@@ -7,6 +7,7 @@ from pet_state import PetState
 
 class Behavior(Scenario):
     id = 'sharpen_claws'
+    requires_desktop = True
     interval_seconds = (180, 360)
 
     def on_start(self):

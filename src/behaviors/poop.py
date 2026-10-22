@@ -7,6 +7,7 @@ from pet_state import PetState
 
 class Behavior(Scenario):
     id = "poop"
+    requires_desktop = True
     flags = ("is_poop",)
     priority = 200
     interval_seconds = (900, 1500)

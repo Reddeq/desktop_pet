@@ -3,6 +3,7 @@ from behavior_runtime import Scenario
 
 class Behavior(Scenario):
     id = 'enter'
+    requires_desktop = True
     preserve_on_menu = True
 
     def on_start(self):

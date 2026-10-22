@@ -187,6 +187,7 @@ class PetMotion(QObject):
     # -------------------------
 
     def _land(self):
+        self.controller.surfaces.land_from_fall()
         self.ctx.is_fall = False
         self.ctx.gravity_speed = 0
         self.pet.move(self.pet.x(), self.pet.ground_y)

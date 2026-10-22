@@ -49,6 +49,9 @@ class Behavior(Scenario):
             "frames_loaded": self.pet.animation_player.has_frames(),
             "scheduled": sorted(self.manager.schedule_snapshot()),
             "has_needs": hasattr(self.controller, "needs"),
+            "window_platforms": (hasattr(self.controller.surfaces, "navigator")
+                and self.pet.context_menu.menu.windows_button.isChecked()
+                    == self.pet.settings.walk_on_windows),
         }))
         self.later(1, QApplication.instance().quit)
 '''
@@ -81,13 +84,14 @@ def main():
             assert data["frames_loaded"], data
             assert all(data[key] for key in ("console_hidden", "console_input_preserved",
                                             "console_command_works")), data
-            assert data["scheduled"] == ["beg_food", "hide", "poop", "sandbath", "sharpen_claws", "sleep"], data
+            assert data["scheduled"] == ["beg_food", "hide", "poop", "sandbath", "sharpen_claws", "sleep", "window_drop"], data
             assert not data["has_needs"], data
+            assert data["window_platforms"], data
             assert set(data["ids"]) == {
                 "idle", "walk", "clean", "sleep", "meow", "eat", "beg_food", "food_beg", "enter",
-                "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath", "smoke_frozen_probe",
+                "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath", "window_drop", "smoke_frozen_probe",
             }, data
-            print("Frozen EXE: 16 built-ins + one external script discovered and executed; assets loaded; clean exit.")
+            print("Frozen EXE: 17 built-ins + one external script discovered and executed; assets loaded; clean exit.")
         finally:
             Path(script.name).unlink()
             # Do not leave a test-created plugin directory in the release.

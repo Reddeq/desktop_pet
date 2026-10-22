@@ -6,6 +6,7 @@ from PyQt6.QtGui import QCursor
 
 from animation_node import AnimationNode as N
 from pet_state import PetState
+from jump_trajectory import JumpTrajectory, flight_progress
 
 
 class CursorJump(QObject):
@@ -64,6 +65,13 @@ class CursorJump(QObject):
         self.landing_x = landing_x
         self.height = max(self.ctx.hunt_jump_height,
                           min(140, screen.bottom() - target.y() + 35))
+        self.trajectory = JumpTrajectory(self.start_x, self.pet.ground_y, self.landing_x,
+                                          self.pet.ground_y, self.height)
+        if self.controller.surfaces.enabled:
+            foot_path = JumpTrajectory(self.start_x, self.pet.ground_y + self.pet.height(),
+                                      self.landing_x, self.pet.ground_y + self.pet.height(), self.height)
+            if not self.controller.surfaces.clear_jump(foot_path):
+                return False
         self.phase = "jump_transition"
         self.finish_pending = False
         self.captured = False
@@ -81,9 +89,9 @@ class CursorJump(QObject):
         if self.phase == "jump":
             progress = (self.clock() - self.jump_started) / self.jump_duration
             # Frames 0–1 are wind-up, 2–6 are flight, 7–10 are landing.
-            t = min(1.0, max(0.0, (progress - 2 / 11) / (5 / 11)))
-            x = round(self.start_x + (self.landing_x - self.start_x) * t)
-            y = round(self.pet.ground_y - 4 * self.height * t * (1 - t))
+            t = flight_progress(progress)
+            x, y = self.trajectory.position(t)
+            x, y = round(x), round(y)
             x, y = self.pet.clamp_position(x, y)
             self.pet.move(x, y)
         elif self.phase == "dig_transition" and self.pet.current_animation_node() == N.DIG:

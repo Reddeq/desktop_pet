@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QWidget
 class ConsoleTests(unittest.TestCase):
     def setUp(self):
         self.pet = QWidget()
+        self.pet.settings = SimpleNamespace(walk_on_windows=False)
         self.pet.current_animation_node = lambda: N.SLEEP
         self.controller = Mock()
         self.controller.pet = self.pet

@@ -229,7 +229,7 @@ class BehaviorTests(unittest.TestCase):
     def test_all_builtins_discovered(self):
         self.assertEqual(set(self.manager.registry), {
             "idle", "walk", "clean", "sleep", "meow", "eat", "enter",
-            "beg_food", "food_beg", "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath",
+            "beg_food", "food_beg", "inspect_notifications", "hide", "poop", "run", "menu_meow", "sharpen_claws", "sandbath", "window_drop",
         })
         self.assertFalse(self.manager.errors)
 

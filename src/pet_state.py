@@ -5,6 +5,7 @@ class PetState(str, Enum):
     IDLE = "idle"
     WALK = "walk"
     FALL = "fall"
+    JUMP = "jump"
     DRAG = "drag"
     RECOVER = "recover"
     CLEAN = "clean"

@@ -16,6 +16,7 @@ from pet_controller import PetController
 from pet_state import PetState
 from debug_console import DebugConsole
 from sprite_label import SpriteLabel
+from pet_settings import PetSettings
 
 
 def get_resource_base_dir():
@@ -45,6 +46,9 @@ class FrameAnimatedPet(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.settings = PetSettings()
 
         self.base_dir = get_resource_base_dir()
         self.assets_path = str(self.base_dir / "assets")
@@ -99,6 +103,11 @@ class FrameAnimatedPet(QWidget):
 
         if not self.controller.behaviors.start("enter"):
             self.show()  # Keep the pet accessible if the RUN clip is unavailable.
+        self.controller.surfaces.set_enabled(self.settings.walk_on_windows)
+
+    def set_walk_on_windows(self, enabled):
+        self.settings.walk_on_windows = enabled
+        self.controller.surfaces.set_enabled(enabled)
 
     # -------------------------
     # Animation-facing API (new)
@@ -183,7 +192,7 @@ class FrameAnimatedPet(QWidget):
             self.snap_to_edge_anchor()
 
             screen_rect = self.get_current_screen_rect()
-            self.ground_y = screen_rect.y() + screen_rect.height() - self.height()
+            self.ground_y = self.controller.surfaces.ground_y()
 
     def on_animation_finished(self, animation_name: str):
         # Сначала даём аниматору обработать очередь / interrupt / transitions
@@ -269,6 +278,10 @@ class FrameAnimatedPet(QWidget):
         return screen.availableGeometry()
 
     def clamp_position(self, x, y):
+        if hasattr(self, 'controller'):
+            position = self.controller.surfaces.clamp(x, y)
+            if position is not None:
+                return position
         screen_rect = self.get_current_screen_rect()
 
         min_x = screen_rect.x()

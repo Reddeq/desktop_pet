@@ -63,6 +63,14 @@ class PetQuickMenu(QWidget):
         )
 
         panel_layout.addWidget(self.console_button)
+        self.windows_button = self._make_square_button(
+            text="Walk on\nwindows",
+            icon=style.standardIcon(QStyle.StandardPixmap.SP_DesktopIcon),
+            callback=self._on_windows,
+        )
+        self.windows_button.setCheckable(True)
+        self.windows_button.setChecked(pet_widget.settings.walk_on_windows)
+        panel_layout.addWidget(self.windows_button)
         panel_layout.addWidget(self.info_button)
         panel_layout.addWidget(self.help_button)
         panel_layout.addWidget(self.exit_button)
@@ -96,6 +104,11 @@ class PetQuickMenu(QWidget):
 
             QToolButton:pressed {
                 background-color: rgba(255, 255, 255, 30);
+            }
+
+            QToolButton:checked {
+                background-color: rgba(72, 125, 180, 180);
+                border: 1px solid rgba(255, 255, 255, 130);
             }
             """
         )
@@ -181,6 +194,9 @@ class PetQuickMenu(QWidget):
             ),
         )
 
+    def _on_windows(self):
+        self.pet_widget.set_walk_on_windows(self.windows_button.isChecked())
+
     def _on_help(self):
         QMessageBox.information(
             self.pet_widget,
@@ -189,6 +205,8 @@ class PetQuickMenu(QWidget):
                 "Controls:\n\n"
                 "• Scroll Mouse Wheel — change interaction mode\n"
                 "• FEED me with meat!\n\n"
+                "• Walk on windows — enable window platforms in this menu.\n"
+                "  Your choice is saved between launches.\n\n"
             ),
         )
     def hideEvent(self, event):

@@ -7,6 +7,7 @@ from pet_context import PetContext
 from pet_cursor_ai import PetCursorAI
 from pet_motion import PetMotion
 from pet_state import PetState
+from surface_controller import SurfaceController
 
 
 class PetController(QObject):
@@ -18,6 +19,7 @@ class PetController(QObject):
         self.cursor_ai = PetCursorAI(self, pet, self.ctx, parent=self)
         self.behaviors = BehaviorManager(self, plugin_dirs=plugin_dirs)
         self.food_cooldown_until = 0.0
+        self.surfaces = SurfaceController(self)
         self.pet.animator.animation_failed.connect(self._on_animation_failed)
         self.logic_timer = self._timer(self.behaviors.logic_tick, 5000)
         self.gravity_timer = self._timer(self.motion.apply_gravity, 20)
@@ -35,6 +37,8 @@ class PetController(QObject):
         self.cursor_ai.start()
 
     def stop(self):
+        self.surfaces.travel.cancel()
+        self.surfaces.close()
         for timer in (self.logic_timer, self.gravity_timer, self.walk_timer):
             timer.stop()
         self.behaviors.cancel()
@@ -47,7 +51,7 @@ class PetController(QObject):
     @property
     def interaction_locked(self):
         return (self.ctx.is_drag or self.ctx.is_fall
-                or self.ctx.is_recover or self.ctx.is_menu_open)
+                or self.ctx.is_recover or self.ctx.is_menu_open or self.surfaces.travel.active)
 
     def is_busy(self):
         return (self.interaction_locked or self.behaviors.active is not None
@@ -57,6 +61,9 @@ class PetController(QObject):
         self.pet.current_state = state
 
     def _on_animation_failed(self, name):
+        if self.surfaces.travel.active:
+            self.surfaces.fall()
+            return
         active = self.behaviors.active
         if active is not None:
             self.behaviors.errors.append(f"{active.id}: missing animation {name}")
@@ -75,6 +82,7 @@ class PetController(QObject):
         if node == AnimationNode.RECOVER and self.ctx.is_recover:
             self.motion.finish_fall_recovery()
         self.cursor_ai.on_animation_finished(node)
+        self.surfaces.travel.animation_finished(node)
         self.behaviors.dispatch("on_animation_finished", node)
 
     def on_animation_loop_finished(self, animation_name):
@@ -86,6 +94,7 @@ class PetController(QObject):
         self.behaviors.dispatch("on_animation_loop_finished", node)
 
     def _reset_motion_flags(self):
+        self.surfaces.travel.cancel()
         self.behaviors.cancel()
         self.cursor_ai.cancel()
         self.ctx.is_fall = False
@@ -104,6 +113,8 @@ class PetController(QObject):
         self.pet.play_node(AnimationNode.SIT_IDLE, replace=True, force_restart=True)
 
     def process_walk_step(self):
+        if self.surfaces.tick():
+            return
         if not self.cursor_ai.process_chase_step():
             self.motion.process_walk_step()
         self.behaviors.dispatch("on_tick")
@@ -120,6 +131,7 @@ class PetController(QObject):
     def on_mouse_press(self, global_pos):
         self.cursor_ai.jump.cancel(preserve_position=True)
         self._reset_motion_flags()
+        self.surfaces.detach()
         self.ctx.is_drag = True
         self._set_logical_state(PetState.DRAG)
         self.pet.interrupt_animation(
@@ -146,9 +158,13 @@ class PetController(QObject):
             return
         self.ctx.is_drag = False
         self.ctx.old_pos = None
+        if self.surfaces.enabled:
+            self.surfaces.prepare_drop()
         if self.pet.y() < self.pet.ground_y:
             self.start_fall()
         else:
+            if self.surfaces.enabled:
+                self.surfaces.land_from_fall()
             self.motion.start_fall_recovery()
 
     def can_feed(self):

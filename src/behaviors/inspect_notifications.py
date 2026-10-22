@@ -7,6 +7,7 @@ from pet_state import PetState
 
 class Behavior(Scenario):
     id = "inspect_notifications"
+    requires_desktop = True
     flags = ("is_inspect_notifications",)
 
     @classmethod

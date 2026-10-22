@@ -31,6 +31,7 @@ class Scenario(QObject):
     preserve_on_menu = False
     interval_seconds = None  # Optional (minimum, maximum) delay between starts.
     priority = 0
+    requires_desktop = False
 
     def __init__(self, manager):
         super().__init__(manager)
@@ -50,6 +51,10 @@ class Scenario(QObject):
     def probability(cls, controller, event):
         """Optional priority trigger evaluated on 'logic' ticks."""
         return 0.0
+
+    @classmethod
+    def can_start(cls, controller):
+        return True
 
     def on_start(self):
         pass
@@ -196,6 +201,21 @@ class BehaviorManager(QObject):
         cls = self.registry.get(behavior_id)
         if cls is None or behavior_id in self.disabled:
             return False
+        try:
+            eligible = cls.can_start(self.controller)
+        except Exception as exc:
+            self.disabled.add(behavior_id)
+            self._error(behavior_id, exc)
+            return False
+        if not eligible:
+            self.postpone(behavior_id)
+            return False
+        if self.controller.surfaces.elevated and cls.requires_desktop:
+            accepted = self.controller.surfaces.request_desktop_behavior(behavior_id)
+            # A missed scheduled interaction is skipped for this occurrence,
+            # rather than rerolling the 20% chance every five seconds.
+            self.postpone(behavior_id)
+            return accepted
         # Construct before interrupting the old behavior in case construction fails.
         try:
             scenario = cls(self)
