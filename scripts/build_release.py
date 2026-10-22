@@ -87,6 +87,9 @@ def main():
     if not app_dir.exists():
         raise RuntimeError(f"Не найдена папка сборки: {app_dir}")
 
+    for document in (root / "packaging" / "release_docs").glob("*.txt"):
+        shutil.copy2(document, app_dir / document.name)
+
     print("[3/4] Создание versioned ZIP...")
     if versioned_zip.exists():
         versioned_zip.unlink()
