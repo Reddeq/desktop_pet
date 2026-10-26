@@ -193,7 +193,12 @@ def main():
         scenario = manager.active
         wait_until(lambda: pet.current_animation_node() == N.EAT, "chew using meow frames")
         assert len(pet.animation_player.frames) == 5
-        wait_until(lambda: pet.current_animation_node() == N.CLEAN, "clean after eating")
+        assert pet.animation_player.current_loop
+        pet.controller.process_walk_step()
+        eat_clock = QElapsedTimer()
+        eat_clock.start()
+        wait_until(lambda: pet.current_animation_node() == N.CLEAN, "clean after five-second eating loop", 8000)
+        assert 4900 <= eat_clock.elapsed() <= 7500, eat_clock.elapsed()
         assert manager.active is scenario
         assert not pet.controller.try_feed()
         pet.controller.process_walk_step()
@@ -248,7 +253,9 @@ def main():
         wait_until(lambda: manager.active is None, "dig exit")
         wait_until(lambda: pet.current_animation_node() == N.SIT_IDLE, "dig idle")
         ai = pet.controller.cursor_ai
-        ai.start_cursor_hunt()
+        hunt_target = QPoint(pet.get_current_screen_rect().center().x(), pet.get_current_screen_rect().bottom() - 20)
+        with patch('cursor_jump.QCursor.pos', return_value=hunt_target):
+            assert ai.start_cursor_hunt()
         wait_until(lambda: pet.current_animation_node() == N.SNEAK, "sneak entry")
         assert len(pet.animation_player.frames) == 8
         seen = []
@@ -266,6 +273,7 @@ def main():
         screen = pet.get_current_screen_rect()
         target = QPoint(screen.center().x(), screen.bottom() - 20)
         mouse = [target]
+        ai._hunt_retry_until = 0.0  # This independent playback case starts after the abort pause.
         with patch('cursor_jump.QCursor.pos', side_effect=lambda: mouse[0]), patch(
             'cursor_jump.QCursor.setPos', side_effect=lambda x, y: mouse.__setitem__(0, QPoint(x, y))
         ) as capture:
@@ -286,6 +294,27 @@ def main():
             assert ai.jump.on_cooldown
             assert not ai.cursor_resist_timer.isActive()
             pet.controller.walk_timer.stop()
+        assert manager.start('poop')
+        scenario = manager.active
+        wait_until(lambda: pet.current_animation_node() == N.RUN, 'poop run')
+        pet.controller.motion.stop_horizontal_motion()
+        pet.controller.process_walk_step()
+        wait_until(lambda: pet.current_animation_node() == N.START_POOP, 'poop squat')
+        assert len(pet.animation_player.frames) == 6
+        wait_until(lambda: pet.current_animation_node() == N.POOP, 'poop seated loop')
+        assert len(pet.animation_player.frames) == 18
+        assert pet.animation_player.current_loop
+        pet.controller.process_walk_step()
+        clock = QElapsedTimer()
+        clock.start()
+        wait_until(lambda: pet.current_animation_node() == N.END_POOP, 'five-second poop loop', 7000)
+        assert 4900 <= clock.elapsed() <= 6500, clock.elapsed()
+        assert len(pet.animation_player.frames) == 4
+        wait_until(lambda: pet.current_animation_node() == N.DIG, 'poop dig entry')
+        pet.controller.process_walk_step()
+        fire_phase_timer(scenario)
+        wait_until(lambda: manager.active is not scenario, 'poop dig exit')
+        assert manager.active.id == 'run'
         assert not manager.errors, manager.errors
         print("Qt playback: all phases plus cursor jump/capture/dig/cooldown OK; mouse mocked")
     finally:

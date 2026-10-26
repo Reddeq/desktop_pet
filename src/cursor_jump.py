@@ -49,29 +49,43 @@ class CursorJump(QObject):
         return (round(self.pet.x() + self.pet.width() * ratio),
                 round(self.pet.y() + self.pet.height() * self.ctx.hunt_paw_y_ratio))
 
-    def start(self):
-        target = QCursor.pos()
+    def plan(self, target, start_x=None):
+        """Use the same landing and clearance checks before approach and takeoff."""
         screen = self.pet.get_current_screen_rect()
         if (self.on_cooldown or not screen.contains(target)
                 or not self.ai._cursor_is_reachable_in_y_relaxed(target)):
-            return False
-        facing = target.x() >= self.pet.x() + self.pet.width() // 2
+            return None
+        start_x = self.pet.x() if start_x is None else start_x
+        facing = target.x() >= start_x + self.pet.width() // 2
         ratio = self.ctx.hunt_paw_x_ratio if facing else 1 - self.ctx.hunt_paw_x_ratio
         landing_x, _ = self.pet.clamp_position(round(target.x() - self.pet.width() * ratio), self.pet.ground_y)
-        if abs(landing_x - self.pet.x()) > self.ctx.hunt_jump_max_distance:
-            return False
-        self.pet.set_facing_right(facing)
-        self.start_x = self.pet.x()
-        self.landing_x = landing_x
-        self.height = max(self.ctx.hunt_jump_height,
-                          min(140, screen.bottom() - target.y() + 35))
-        self.trajectory = JumpTrajectory(self.start_x, self.pet.ground_y, self.landing_x,
-                                          self.pet.ground_y, self.height)
+        if abs(landing_x - start_x) > self.ctx.hunt_jump_max_distance:
+            return None
+        paw_x = round(landing_x + self.pet.width() * ratio)
+        paw_y = round(self.pet.ground_y + self.pet.height() * self.ctx.hunt_paw_y_ratio)
+        if ((target.x() - paw_x) ** 2 + (target.y() - paw_y) ** 2
+                > self.ctx.hunt_capture_radius ** 2):
+            return None
+        height = max(self.ctx.hunt_jump_height,
+                     min(140, self.pet.ground_y + self.pet.height() - target.y() + 35))
+        trajectory = JumpTrajectory(start_x, self.pet.ground_y, landing_x,
+                                    self.pet.ground_y, height)
         if self.controller.surfaces.enabled:
-            foot_path = JumpTrajectory(self.start_x, self.pet.ground_y + self.pet.height(),
-                                      self.landing_x, self.pet.ground_y + self.pet.height(), self.height)
+            foot_path = JumpTrajectory(start_x, self.pet.ground_y + self.pet.height(),
+                                      landing_x, self.pet.ground_y + self.pet.height(), height)
             if not self.controller.surfaces.clear_jump(foot_path):
-                return False
+                return None
+        return trajectory, facing
+
+    def start(self):
+        plan = self.plan(QCursor.pos())
+        if plan is None:
+            return False
+        self.trajectory, facing = plan
+        self.pet.set_facing_right(facing)
+        self.start_x = self.trajectory.start_x
+        self.landing_x = self.trajectory.end_x
+        self.height = self.trajectory.height
         self.phase = "jump_transition"
         self.finish_pending = False
         self.captured = False

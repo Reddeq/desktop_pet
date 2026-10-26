@@ -75,6 +75,7 @@ class PetContext:
     hunt_capture_radius: int = 120
     hunt_dig_duration_ms: int = 2500
     hunt_cooldown_seconds: int = 60
+    hunt_retry_seconds: int = 5
     hunt_paw_x_ratio: float = 0.60
     hunt_paw_y_ratio: float = 0.99
 

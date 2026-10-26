@@ -10,10 +10,11 @@ class Behavior(Scenario):
     requires_desktop = True
     flags = ("is_poop",)
     priority = 200
-    interval_seconds = (900, 1500)
+    retry_seconds = 30
 
     def on_start(self):
         self.dig_finish_pending = False
+        self.poop_finish_pending = False
         screen = self.pet.get_current_screen_rect()
         left = screen.x() + 20
         right = max(left, screen.x() + screen.width() - self.pet.width() - 20)
@@ -28,7 +29,7 @@ class Behavior(Scenario):
             self.play(AnimationNode.POOP)
         elif self.phase == "poop_transition" and node == AnimationNode.POOP:
             self.phase = "poop"
-            self.later(random.randint(2000, 4000), self._dig)
+            self.later(5000, self._request_finish_poop)
         elif self.phase == "dig_transition" and node == AnimationNode.DIG:
             self.phase = "dig"
             self.later(random.randint(1500, 2500), self._request_finish_dig)
@@ -36,13 +37,22 @@ class Behavior(Scenario):
     def _request_finish_dig(self):
         self.dig_finish_pending = True
 
+    def _request_finish_poop(self):
+        self.poop_finish_pending = True
+
     def on_animation_loop_finished(self, node):
+        if (node == AnimationNode.POOP and self.phase == "poop"
+                and self.poop_finish_pending):
+            self.phase = "poop_end"
+            self.play(AnimationNode.END_POOP)
         if (node == AnimationNode.DIG and self.phase == "dig"
                 and self.dig_finish_pending):
             self.phase = "dig_end"
             self.play(AnimationNode.END_DIG, PetState.DIG)
 
     def on_animation_finished(self, node):
+        if node == AnimationNode.END_POOP and self.phase == "poop_end":
+            self._dig()
         if node == AnimationNode.END_DIG and self.phase == "dig_end":
             self._run()
 

@@ -39,8 +39,10 @@ NODE_META: dict[AnimationNode, NodeMeta] = {
     AnimationNode.SCRATCH_SCREEN: NodeMeta(loop=True),
     AnimationNode.START_SCRATCH_SCREEN: NodeMeta(loop=False),
     AnimationNode.END_SCRATCH_SCREEN: NodeMeta(loop=False),
-    AnimationNode.EAT: NodeMeta(loop=False),
-    AnimationNode.POOP: NodeMeta(loop=False),
+    AnimationNode.EAT: NodeMeta(loop=True),
+    AnimationNode.START_POOP: NodeMeta(loop=False),
+    AnimationNode.POOP: NodeMeta(loop=True),
+    AnimationNode.END_POOP: NodeMeta(loop=False),
     AnimationNode.STARTLE: NodeMeta(loop=False),
     AnimationNode.SNEAK: NodeMeta(loop=True, requires_motion=True),
     AnimationNode.START_SNEAK: NodeMeta(loop=False),
@@ -143,7 +145,9 @@ TRANSITIONS: dict[AnimationNode, list[AnimationNode]] = {
         AnimationNode.STAND_IDLE,
     ],
 
-    AnimationNode.POOP: [
+    AnimationNode.START_POOP: [AnimationNode.POOP],
+    AnimationNode.POOP: [AnimationNode.END_POOP],
+    AnimationNode.END_POOP: [
         AnimationNode.STAND_IDLE,
     ],
 
@@ -176,7 +180,7 @@ TRANSITIONS: dict[AnimationNode, list[AnimationNode]] = {
         AnimationNode.START_SHARPEN_CLAWS,
         AnimationNode.JUMP,
         AnimationNode.START_SCRATCH_SCREEN,
-        AnimationNode.POOP,
+        AnimationNode.START_POOP,
         AnimationNode.WALK,
         AnimationNode.START_DIG,
         AnimationNode.RUN,

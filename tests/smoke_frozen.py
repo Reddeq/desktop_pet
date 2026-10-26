@@ -84,7 +84,7 @@ def main():
             assert data["frames_loaded"], data
             assert all(data[key] for key in ("console_hidden", "console_input_preserved",
                                             "console_command_works")), data
-            assert data["scheduled"] == ["beg_food", "hide", "poop", "sandbath", "sharpen_claws", "sleep", "window_drop"], data
+            assert data["scheduled"] == ["beg_food", "hide", "sandbath", "sharpen_claws", "sleep", "window_drop"], data
             assert not data["has_needs"], data
             assert data["window_platforms"], data
             assert set(data["ids"]) == {

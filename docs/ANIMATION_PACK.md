@@ -45,7 +45,9 @@
 | end_sandbath | 4. Sandbathing: 009–014, подъём |
 | sleep | 2. Sleep — только 004–007 (дыхание) |
 | meow | 4. Meowing |
-| poop | 0. Toilet |
+| start_poop | 0. Toilet: 000–005, приседание |
+| poop | 0. Toilet: 006–023, цикл оглядывания |
+| end_poop | 0. Toilet: 024–027, подъём |
 | startle | 0. Scared |
 | start_sneak | 1. Sneaking: 000–002 |
 | sneak | 1. Sneaking: 003–010, цикл подкрадывания |

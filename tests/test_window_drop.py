@@ -11,6 +11,31 @@ class WindowDropTests(unittest.TestCase):
     setUp = fixtures.BindingTests.setUp
     tearDown = fixtures.BindingTests.tearDown
     attach = fixtures.BindingTests.attach
+
+    def test_food_poop_request_retries_after_failed_or_canceled_descent(self):
+        self.attach()
+        manager = self.controller.behaviors
+        now = [1000]
+        manager._clock = lambda: now[0]
+        manager._next_due = {'poop': 1000}
+        with patch('surface_controller.random.random', return_value=1), patch.object(
+            manager, '_score', return_value=0
+        ):
+            manager.logic_tick()
+            self.assertEqual(manager._next_due['poop'], 1030)
+            now[0] = 1029
+            manager.logic_tick()
+            self.assertFalse(self.surfaces.travel.active)
+        now[0] = 1030
+        with patch('surface_controller.random.random', return_value=0):
+            manager.logic_tick()
+        self.assertTrue(self.surfaces.travel.active)
+        self.assertEqual(self.surfaces.travel.after_behavior, 'poop')
+        self.assertEqual(manager._next_due['poop'], 1060)
+        self.surfaces.travel.cancel()
+        self.controller.motion.stop_horizontal_motion()
+        self.assertEqual(manager._next_due['poop'], 1060)
+
     def reach_hidden(self):
         self.assertTrue(self.controller.start_behavior('window_drop'))
         scenario = self.controller.behaviors.active

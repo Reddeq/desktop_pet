@@ -13,17 +13,30 @@ class Behavior(CleanBehavior):
 
     def on_start(self):
         self.consumed = False
-        self.phase = "eat"
+        self.eat_finish_pending = False
+        self.phase = "eat_start"
         self.ctx.is_clean = False
         self.play(AnimationNode.EAT)
 
-    def on_animation_finished(self, node):
-        if node == AnimationNode.EAT and self.phase == "eat":
+    def on_tick(self):
+        if self.phase == "eat_start" and self.pet.current_animation_node() == AnimationNode.EAT:
+            self.phase = "eat"
+            self.later(5000, self._request_finish_eat)
+        else:
+            super().on_tick()
+
+    def _request_finish_eat(self):
+        self.eat_finish_pending = True
+
+    def on_animation_loop_finished(self, node):
+        if (node == AnimationNode.EAT and self.phase == "eat"
+                and self.eat_finish_pending):
             self.consumed = True
+            self.manager.request_once("poop", 60)
             self.ctx.is_clean = True
             super().on_start()
         else:
-            super().on_animation_finished(node)
+            super().on_animation_loop_finished(node)
 
     def on_stop(self):
         if self.consumed:

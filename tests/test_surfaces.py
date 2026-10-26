@@ -189,6 +189,40 @@ class BindingTests(unittest.TestCase):
             other.stop()
             other.deleteLater()
 
+    def test_cursor_hunt_rejects_no_headroom_before_playing_sneak(self):
+        from PyQt6.QtCore import QPoint
+        self.tracker.windows = [Window(1, Rect(200, 100, 800, 550))]
+        self.surfaces.refresh()
+        window = next(p for p in self.surfaces.snapshot.platforms if p.window == 1)
+        self.pet.move(300, 0)
+        self.surfaces.attach(window)
+        self.pet.force_set_animation_node(N.STAND_IDLE)
+        step = self.pet.animator.current_step
+        ai = self.controller.cursor_ai
+        with patch('pet_cursor_ai.QCursor.pos', return_value=QPoint(700, 50)):
+            for _ in range(100):
+                self.controller.ctx.cursor_stationary_ms = 20_000
+                ai.check_cursor_proximity()
+                ai.process_chase_step()
+        self.assertIs(self.pet.animator.current_step, step)
+        self.assertFalse(self.controller.ctx.is_hunt_cursor)
+
+    def test_cursor_hunt_height_is_relative_to_window_instead_of_screen_bottom(self):
+        from PyQt6.QtCore import QPoint
+        self.tracker.windows = [Window(1, Rect(200, 200, 800, 550))]
+        self.surfaces.refresh()
+        window = next(p for p in self.surfaces.snapshot.platforms if p.window == 1)
+        self.pet.move(300, 100)
+        self.surfaces.attach(window)
+        ai = self.controller.cursor_ai
+        target = QPoint(700, 190)
+        launch_x, _ = ai._get_hunt_target_x(target)
+        plan = ai.jump.plan(target, start_x=launch_x)
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan[0].height, 70)
+        with patch('pet_cursor_ai.QCursor.pos', return_value=target):
+            self.assertTrue(ai.start_cursor_hunt())
+
     def test_attached_pet_follows_window_without_restarting_animation(self):
         self.attach()
         self.controller.behaviors.start('clean')

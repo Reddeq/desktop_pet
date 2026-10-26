@@ -245,6 +245,58 @@ class JumpTests(unittest.TestCase):
                 self.assertTrue(self.ai._hunt_exit_started)
                 self.assertEqual(self.pet.current_animation_node(), N.END_SNEAK)
 
+    def test_target_above_capture_range_never_starts_repeated_sneak(self):
+        self.pet.height = lambda: 240
+        self.pet.ground_y = 360
+        self.pet.move(400, 360)
+        self.cursor.return_value = QPoint(800, 400)
+        self.assertTrue(self.ai._cursor_is_reachable_in_y_strict(self.cursor.return_value))
+        self.pet.animator.force_set_node(N.STAND_IDLE)
+        step = self.pet.animator.current_step
+        for _ in range(100):
+            self.controller.ctx.cursor_stationary_ms = 20_000
+            self.ai.check_cursor_proximity()
+            self.ai.process_chase_step()
+        self.assertIs(self.pet.animator.current_step, step)
+        self.assertFalse(self.controller.ctx.is_hunt_cursor)
+        self.assertFalse(self.jump.active)
+        self.move_cursor.assert_not_called()
+
+    def test_jump_refused_after_sneak_resets_stationary_wait_and_delays_retry(self):
+        self.pet.animator.force_set_node(N.STAND_IDLE)
+        self.assertTrue(self.ai.start_cursor_hunt())
+        self.reach(N.SNEAK)
+        x, _ = self.ai._get_hunt_target_x(self.cursor.return_value)
+        self.pet.move(x, self.pet.ground_y)
+        self.ai.process_chase_step()
+        self.assertEqual(self.pet.current_animation_node(), N.END_SNEAK)
+        self.controller.ctx.cursor_stationary_ms = 20_000
+        with patch.object(self.jump, 'plan', return_value=None):
+            self.finish(N.END_SNEAK)
+        self.assertFalse(self.jump.active)
+        self.assertFalse(self.controller.ctx.is_hunt_cursor)
+        self.assertEqual(self.controller.ctx.cursor_stationary_ms, 0)
+        self.assertFalse(self.ai.start_cursor_hunt())
+        for _ in range(20):
+            self.ai.check_cursor_proximity()
+        self.assertFalse(self.controller.ctx.is_hunt_cursor)
+        self.now += self.controller.ctx.hunt_retry_seconds
+        self.assertTrue(self.ai.start_cursor_hunt())
+
+    def test_losing_target_height_during_sneak_does_not_restart_approach(self):
+        self.pet.animator.force_set_node(N.STAND_IDLE)
+        self.assertTrue(self.ai.start_cursor_hunt())
+        self.reach(N.SNEAK)
+        self.cursor.return_value = QPoint(700, 50)
+        self.ai.process_chase_step()
+        self.controller.on_animation_loop_finished(N.SNEAK.value)
+        self.assertEqual(self.pet.current_animation_node(), N.END_SNEAK)
+        self.finish(N.END_SNEAK)
+        for _ in range(20):
+            self.ai.check_cursor_proximity()
+        self.assertFalse(self.controller.ctx.is_hunt_cursor)
+        self.assertFalse(self.jump.active)
+
 
 if __name__ == '__main__':
     unittest.main()

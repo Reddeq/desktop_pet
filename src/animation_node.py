@@ -32,6 +32,8 @@ class AnimationNode(str, Enum):
     END_SCRATCH_SCREEN = "end_scratch_screen"
     EAT = "eat"
     POOP = "poop"
+    START_POOP = "start_poop"
+    END_POOP = "end_poop"
     STARTLE = "startle"
     SNEAK = "sneak"
     START_SNEAK = "start_sneak"

@@ -30,6 +30,7 @@ class Scenario(QObject):
     blocks_cursor = True
     preserve_on_menu = False
     interval_seconds = None  # Optional (minimum, maximum) delay between starts.
+    retry_seconds = None  # Retry an event request until it actually starts.
     priority = 0
     requires_desktop = False
 
@@ -147,6 +148,14 @@ class BehaviorManager(QObject):
         interval = self.registry[behavior_id].interval_seconds
         if interval is not None:
             self._next_due[behavior_id] = self._clock() + random.uniform(*interval)
+        elif (self.registry[behavior_id].retry_seconds is not None
+              and behavior_id in self._next_due):
+            self._next_due[behavior_id] = self._clock() + self.registry[behavior_id].retry_seconds
+
+    def request_once(self, behavior_id, delay):
+        """Keep the earliest outstanding request; another event must not delay it."""
+        deadline = self._clock() + delay
+        self._next_due[behavior_id] = min(deadline, self._next_due.get(behavior_id, deadline))
 
     def schedule_snapshot(self):
         now = self._clock()
@@ -229,7 +238,10 @@ class BehaviorManager(QObject):
             setattr(self.controller.ctx, flag, True)
         self.invoke(scenario, scenario.on_start)
         if behavior_id not in self.disabled:
-            self.postpone(behavior_id)
+            if cls.retry_seconds is not None:
+                self._next_due.pop(behavior_id, None)
+            else:
+                self.postpone(behavior_id)
         return behavior_id not in self.disabled
 
     def cancel(self):
@@ -278,6 +290,10 @@ class BehaviorManager(QObject):
 
     def logic_tick(self):
         if self.controller.is_busy():
+            now = self._clock()
+            for name, deadline in list(self._next_due.items()):
+                if deadline <= now and self.registry[name].retry_seconds is not None:
+                    self.postpone(name)
             return
         now = self._clock()
         due = [self.registry[name] for name, deadline in self._next_due.items()
@@ -285,6 +301,8 @@ class BehaviorManager(QObject):
         for cls in sorted(due, key=lambda cls: (-cls.priority, self._next_due[cls.id], cls.id)):
             if self.start(cls.id):
                 return
+            if cls.retry_seconds is not None:
+                self.postpone(cls.id)
         if self._trigger("logic"):
             return
         candidates = list(self.registry.values())

@@ -48,6 +48,7 @@ class PetCursorAI(QObject):
 
         self._hunt_exit_target = None
         self._hunt_exit_started = False
+        self._hunt_retry_until = 0.0
         self.jump = CursorJump(self)
 
     # -------------------------
@@ -178,10 +179,10 @@ class PetCursorAI(QObject):
 
     def _cursor_is_visible_for_hunt(self, cursor_pos: QPoint) -> bool:
         """
-        Манул считает курсор видимым на всей ширине активного экрана.
+        Цель должна находиться внутри активного экрана по обеим координатам.
         """
         screen_rect = self.pet.get_current_screen_rect()
-        return screen_rect.left() <= cursor_pos.x() <= screen_rect.right()
+        return screen_rect.contains(cursor_pos)
 
     def _cursor_is_near_pet(self, cursor_pos: QPoint) -> bool:
         """
@@ -322,8 +323,21 @@ class PetCursorAI(QObject):
     # Hunting / wait / swat
     # -------------------------
 
+    def _can_hunt_target(self, cursor_pos):
+        if (self.jump.clock() < self._hunt_retry_until
+                or not self._cursor_is_visible_for_hunt(cursor_pos)
+                or not self._cursor_is_reachable_in_y_strict(cursor_pos)):
+            return False
+        launch_x, _ = self._get_hunt_target_x(cursor_pos)
+        return self.jump.plan(cursor_pos, start_x=launch_x) is not None
+
+    def _defer_hunt(self):
+        self._hunt_retry_until = self.jump.clock() + self.ctx.hunt_retry_seconds
+        self.ctx.cursor_stationary_ms = 0
+        self.ctx.cursor_still_ticks = 0
+
     def start_cursor_hunt(self):
-        if self.jump.on_cooldown:
+        if not self._can_hunt_target(QCursor.pos()):
             return False
         self.controller._reset_motion_flags()
         self.ctx.is_hunt_cursor = True
@@ -351,6 +365,8 @@ class PetCursorAI(QObject):
     def _request_hunt_exit(self, target):
         if not self.ctx.is_hunt_cursor:
             return
+        if target == "idle" and self._hunt_exit_target != "idle":
+            self._defer_hunt()
         self._hunt_exit_target = target
         self._stop_hunt_motion()
         if target == "jump":
@@ -383,6 +399,7 @@ class PetCursorAI(QObject):
         self.ctx.is_hunt_cursor = False
         if target == "jump":
             if not self.jump.start():
+                self._defer_hunt()
                 self.controller.start_idle()
         elif target == "swat":
             self.start_wait_to_swat()
@@ -647,8 +664,7 @@ class PetCursorAI(QObject):
             return
 
         if self.ctx.is_hunt_cursor:
-            if (not self._cursor_is_visible_for_hunt(cursor_pos)
-                    or not self._cursor_is_reachable_in_y_relaxed(cursor_pos)
+            if (not self._can_hunt_target(cursor_pos)
                     or not self._cursor_is_stationary_long_enough_for_hunt()):
                 self.finish_cursor_hunt(go_idle=True)
             return
@@ -731,7 +747,8 @@ class PetCursorAI(QObject):
         if self.ctx.is_hunt_cursor and not self.ctx.is_drag:
             cursor_pos = QCursor.pos()
 
-            if not self._cursor_is_reachable_in_y_strict(cursor_pos):
+            if (not self._cursor_is_visible_for_hunt(cursor_pos)
+                    or not self._cursor_is_reachable_in_y_strict(cursor_pos)):
                 self.finish_cursor_hunt(go_idle=True)
                 return True
 

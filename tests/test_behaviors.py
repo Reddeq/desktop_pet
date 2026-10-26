@@ -89,6 +89,15 @@ class BehaviorTests(unittest.TestCase):
         self.pet.animator.on_animation_finished(node.value)
         self.controller.on_animation_finished(node.value)
 
+    def finish_eating(self):
+        self.controller.process_walk_step()
+        scenario = self.manager.active
+        timer = next(iter(scenario._timers))
+        self.assertEqual(timer.interval(), 5000)
+        timer.stop()
+        timer.timeout.emit()
+        self.controller.on_animation_loop_finished(N.EAT.value)
+
     def reach(self, target):
         for _ in range(30):
             if self.pet.current_animation_node() == target:
@@ -132,7 +141,8 @@ class BehaviorTests(unittest.TestCase):
 
     def test_hunt_waits_for_stand_up_without_restarting(self):
         ai = self.controller.cursor_ai
-        ai.start_cursor_hunt()
+        with patch("pet_cursor_ai.QCursor.pos", return_value=QPoint(700, 550)):
+            self.assertTrue(ai.start_cursor_hunt())
         step = self.pet.animator.current_step
         self.assertEqual(step.node, N.STAND_UP)
         with patch("pet_cursor_ai.QCursor.pos", return_value=self.pet_point()), patch.object(ai, "_can_swat_cursor_strict", return_value=False), patch.object(ai, "_cursor_is_reachable_in_y_strict", return_value=True):
@@ -145,7 +155,8 @@ class BehaviorTests(unittest.TestCase):
     def begin_sneak(self):
         self.pet.animator.force_set_node(N.STAND_IDLE)
         ai = self.controller.cursor_ai
-        ai.start_cursor_hunt()
+        with patch("pet_cursor_ai.QCursor.pos", return_value=QPoint(700, 550)):
+            self.assertTrue(ai.start_cursor_hunt())
         self.assertEqual(self.pet.current_animation_node(), N.START_SNEAK)
         self.reach(N.SNEAK)
         return ai
@@ -359,7 +370,7 @@ class BehaviorTests(unittest.TestCase):
         self.manager.logic_tick()
         self.assertIs(self.manager.active, scenario)
         self.assertEqual(scenario.phase, "start")
-        self.assertEqual(self.manager._next_due["poop"], 0)
+        self.assertGreater(self.manager._next_due["poop"], self.manager._clock())
 
     def test_sleep_duration_starts_after_transition_and_wakes(self):
         self.manager.start("sleep")
@@ -1035,8 +1046,15 @@ class Behavior(Scenario):
         self.assertEqual(self.pet.current_animation_node(), N.POOP)
         self.assertEqual(scenario.phase, "poop")
         timer = next(iter(scenario._timers))
+        self.assertEqual(timer.interval(), 5000)
+        self.controller.on_animation_loop_finished(N.POOP.value)
+        self.assertEqual(self.pet.current_animation_node(), N.POOP)
         timer.stop()
         timer.timeout.emit()
+        self.assertEqual(self.pet.current_animation_node(), N.POOP)
+        self.controller.on_animation_loop_finished(N.POOP.value)
+        self.assertEqual(self.pet.current_animation_node(), N.END_POOP)
+        self.finish_animation(N.END_POOP)
         self.reach(N.START_DIG)
         self.controller.process_walk_step()
         self.assertFalse(scenario._timers)
@@ -1126,7 +1144,7 @@ class Behavior(Scenario):
         self.manager.logic_tick()
         self.assertEqual(self.manager.active.id, "eat")
         self.reach(N.EAT)
-        self.finish_animation(N.EAT)
+        self.finish_eating()
         self.manager.logic_tick()
         self.assertEqual(self.manager.active.id, "eat")
         self.reach(N.CLEAN)
@@ -1134,8 +1152,76 @@ class Behavior(Scenario):
         self.manager.active._request_finish()
         self.controller.on_animation_loop_finished(N.CLEAN.value)
         self.finish_animation(N.END_CLEAN)
+        deadline = self.manager._next_due["poop"]
+        self.manager._clock = lambda: deadline
         self.manager.logic_tick()
         self.assertEqual(self.manager.active.id, "poop")
+        self.assertNotIn("poop", self.manager._next_due)
+
+    def test_poop_only_scheduled_after_food_is_consumed(self):
+        self.assertNotIn("poop", self.manager._next_due)
+        self.manager._clock = lambda: 100
+        self.assertTrue(self.controller.try_feed())
+        self.assertNotIn("poop", self.manager._next_due)
+        self.reach(N.EAT)
+        self.finish_eating()
+        self.assertEqual(self.manager._next_due["poop"], 160)
+        self.manager.request_once("poop", 60)
+        self.assertEqual(self.manager._next_due["poop"], 160)
+        self.manager._clock = lambda: 120
+        self.manager.request_once("poop", 60)
+        self.assertEqual(self.manager._next_due["poop"], 160)
+
+    def test_poop_retries_every_thirty_seconds_while_busy(self):
+        self.manager._clock = lambda: 100
+        self.manager._next_due = {"poop": 100}
+        self.manager.start("clean")
+        self.manager.logic_tick()
+        self.assertEqual(self.manager._next_due["poop"], 130)
+        self.controller.start_idle()
+        with patch.object(self.manager, "_score", return_value=0):
+            self.manager._clock = lambda: 129
+            self.manager.logic_tick()
+            self.assertIsNone(self.manager.active)
+        self.manager._clock = lambda: 130
+        self.manager.logic_tick()
+        self.assertEqual(self.manager.active.id, "poop")
+        self.assertNotIn("poop", self.manager._next_due)
+
+    def test_eat_waits_five_seconds_and_finishes_on_loop_boundary(self):
+        self.manager._clock = lambda: 100
+        self.assertTrue(self.controller.try_feed())
+        scenario = self.manager.active
+        self.assertFalse(scenario._timers)
+        self.reach(N.EAT)
+        self.controller.process_walk_step()
+        timer = next(iter(scenario._timers))
+        self.assertEqual(timer.interval(), 5000)
+        self.controller.on_animation_loop_finished(N.EAT.value)
+        self.assertEqual(scenario.phase, "eat")
+        self.assertNotIn("poop", self.manager._next_due)
+        timer.stop()
+        timer.timeout.emit()
+        self.assertEqual(scenario.phase, "eat")
+        self.assertFalse(scenario.consumed)
+        self.manager._clock = lambda: 105
+        self.controller.on_animation_loop_finished(N.EAT.value)
+        self.assertTrue(scenario.consumed)
+        self.assertEqual(self.manager._next_due["poop"], 165)
+        self.reach(N.CLEAN)
+        self.assertTrue(self.controller.ctx.is_clean)
+
+    def test_cancel_eat_loop_removes_timer_and_does_not_schedule_poop(self):
+        self.assertTrue(self.controller.try_feed())
+        self.reach(N.EAT)
+        self.controller.process_walk_step()
+        timer = next(iter(self.manager.active._timers))
+        self.controller.start_idle()
+        self.assertFalse(timer.isActive())
+        timer.timeout.emit()
+        self.controller.on_animation_loop_finished(N.EAT.value)
+        self.assertNotIn("poop", self.manager._next_due)
+        self.assertFalse(self.controller.ctx.is_eat)
 
     def test_food_uses_meow_then_clean_and_ignores_food_for_a_minute(self):
         now = [100.0]
@@ -1144,7 +1230,7 @@ class Behavior(Scenario):
         scenario = self.manager.active
         self.assertFalse(self.controller.ctx.is_clean)
         self.reach(N.EAT)
-        self.finish_animation(N.EAT)
+        self.finish_eating()
         self.reach(N.CLEAN)
         self.assertTrue(self.controller.ctx.is_clean)
         self.assertFalse(self.controller.try_feed())
@@ -1166,7 +1252,7 @@ class Behavior(Scenario):
         self.manager._clock = lambda: 100.0
         self.controller.try_feed()
         self.reach(N.EAT)
-        self.finish_animation(N.EAT)
+        self.finish_eating()
         self.controller.start_menu_meow()
         active = self.manager.active
         self.controller.on_animation_finished(N.END_CLEAN.value)

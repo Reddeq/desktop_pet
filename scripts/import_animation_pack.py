@@ -32,7 +32,9 @@ CLIPS = {
     'end_sandbath': ('4. Sandbathing', list(range(9, 15)), 130, 'direct'),
     'sleep': ('2. Sleep', [4, 5, 6, 7], 180, 'direct'),
     'meow': ('4. Meowing', None, 120, 'direct'),
-    'poop': ('0. Toilet', None, 100, 'direct'),
+    'start_poop': ('0. Toilet', list(range(6)), 100, 'direct'),
+    'poop': ('0. Toilet', list(range(6, 24)), 100, 'direct'),
+    'end_poop': ('0. Toilet', list(range(24, 28)), 100, 'direct'),
     'startle': ('0. Scared', None, 100, 'direct'),
     'start_sneak': ('1. Sneaking', [0, 1, 2], 100, 'direct'),
     'sneak': ('1. Sneaking', list(range(3, 11)), 100, 'direct'),
@@ -134,7 +136,7 @@ def prepare_clip(source, indices, offsets=None):
                                           CANVAS[1] - sprite.height + dy))
                 output.append(normalized)
             return output, names
-        if source.name in {'2. Sleep', '3. Cleaning', '2. Digging', '1. Sneaking', 'Точит когти', '4. Sandbathing'}:
+        if source.name in {'0. Toilet', '2. Sleep', '3. Cleaning', '2. Digging', '1. Sneaking', 'Точит когти', '4. Sandbathing'}:
             # All phases share the same origin and bounding box.
             group = []
             for path in files:
